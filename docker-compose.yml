@@ -1,0 +1,104 @@
+# Local development stack. Usage (PowerShell):  Copy-Item .env.example .env ; docker compose up --build
+# Secrets come from .env. Only web (3000), api (8000) and the Mailpit UI (8025) are published,
+# and only on 127.0.0.1. PostgreSQL, Redis and storage stay on the internal network.
+
+x-backend-env: &backend-env
+  env_file: .env
+  environment:
+    DATAMEDIC_DATABASE_URL: postgresql+psycopg://dm_app:${DATAMEDIC_DB_APP_PASSWORD}@db:5432/datamedic
+    DATAMEDIC_MAINTENANCE_DATABASE_URL: postgresql+psycopg://dm_maintenance:${DATAMEDIC_DB_MAINTENANCE_PASSWORD}@db:5432/datamedic
+    DATAMEDIC_MIGRATION_DATABASE_URL: postgresql+psycopg://dm_migrator:${DATAMEDIC_DB_MIGRATOR_PASSWORD}@db:5432/datamedic
+    DATAMEDIC_BOOTSTRAP_ADMIN_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+    DATAMEDIC_REDIS_URL: redis://redis:6379/0
+    DATAMEDIC_JOBS_EAGER: "false"
+    DATAMEDIC_STORAGE_ROOT: /data/storage
+    DATAMEDIC_SMTP_HOST: mailpit
+    DATAMEDIC_SMTP_PORT: "1025"
+    DATAMEDIC_EMAIL_BACKEND: smtp
+
+services:
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7.4.12-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  migrate:
+    build: ./backend
+    <<: *backend-env
+    command: ["sh", "-c", "python -m datamedic.db.bootstrap && alembic upgrade head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: ./backend
+    <<: *backend-env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    <<: *backend-env
+    command: ["celery", "-A", "datamedic.workers.tasks", "worker", "-Q", "ingest,maintenance",
+              "--concurrency", "2", "--loglevel", "INFO"]
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: ./backend
+    <<: *backend-env
+    command: ["celery", "-A", "datamedic.workers.tasks", "beat", "--loglevel", "INFO",
+              "--schedule", "/tmp/celerybeat-schedule"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  storage:
