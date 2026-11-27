@@ -57,4 +57,13 @@ class ObjectStorage(Protocol):
 
     def list_prefix(self, prefix: str) -> list[str]: ...
 
+    def modified_at(self, key: str) -> float:
+        """POSIX timestamp of when the object was written."""
+        ...
+
+    def delete(self, key: str) -> bool:
+        """Delete one derived object (never under ``raw/``). Used only by orphan
+        reconciliation for objects no row references. Returns False if it did not exist."""
+        ...
+
     def check_writable(self) -> bool: ...

@@ -1,0 +1,177 @@
+# Production stack (single VM). Usage on the server, from the repository root:
+#   cp deploy/.env.production.example .env.production   # then fill in every value
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Only Caddy publishes ports (80/443, automatic HTTPS). PostgreSQL, Redis, the API, workers and
+# the web server stay on the internal network. Data lives in named volumes (see docs/DEPLOYMENT.md
+# for backup, restore and rollback). Sized for 4 vCPU / 8 GB; see the memory notes per service.
+
+x-backend-vars: &backend-vars
+  DATAMEDIC_ENVIRONMENT: production
+  DATAMEDIC_DATABASE_URL: postgresql+psycopg://dm_app:${DATAMEDIC_DB_APP_PASSWORD:?}@db:5432/datamedic
+  DATAMEDIC_MAINTENANCE_DATABASE_URL: postgresql+psycopg://dm_maintenance:${DATAMEDIC_DB_MAINTENANCE_PASSWORD:?}@db:5432/datamedic
+  DATAMEDIC_MIGRATION_DATABASE_URL: postgresql+psycopg://dm_migrator:${DATAMEDIC_DB_MIGRATOR_PASSWORD:?}@db:5432/datamedic
+  DATAMEDIC_BOOTSTRAP_ADMIN_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?}@db:5432/postgres
+  DATAMEDIC_DB_APP_PASSWORD: ${DATAMEDIC_DB_APP_PASSWORD}
+  DATAMEDIC_DB_MIGRATOR_PASSWORD: ${DATAMEDIC_DB_MIGRATOR_PASSWORD}
+  DATAMEDIC_DB_MAINTENANCE_PASSWORD: ${DATAMEDIC_DB_MAINTENANCE_PASSWORD}
+  DATAMEDIC_DB_NAME: datamedic
+  DATAMEDIC_REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:6379/0
+  DATAMEDIC_JOBS_EAGER: "false"
+  DATAMEDIC_STORAGE_ROOT: /data/storage
+  DATAMEDIC_WEB_ORIGIN: https://${DATAMEDIC_DOMAIN:?}
+  DATAMEDIC_PUBLIC_WEB_URL: https://${DATAMEDIC_DOMAIN}
+  DATAMEDIC_COOKIE_SECURE: "true"
+  DATAMEDIC_EMAIL_BACKEND: smtp
+  DATAMEDIC_SMTP_HOST: ${DATAMEDIC_SMTP_HOST:?}
+  DATAMEDIC_SMTP_PORT: ${DATAMEDIC_SMTP_PORT:-587}
+  DATAMEDIC_SMTP_SECURITY: ${DATAMEDIC_SMTP_SECURITY:-starttls}
+  DATAMEDIC_SMTP_USERNAME: ${DATAMEDIC_SMTP_USERNAME:-}
+  DATAMEDIC_SMTP_PASSWORD: ${DATAMEDIC_SMTP_PASSWORD:-}
+  DATAMEDIC_SMTP_FROM: ${DATAMEDIC_SMTP_FROM:?}
+  DATAMEDIC_MAX_UPLOAD_BYTES: ${DATAMEDIC_MAX_UPLOAD_BYTES:-52428800}
+  DATAMEDIC_MAX_DATASETS_PER_USER: ${DATAMEDIC_MAX_DATASETS_PER_USER:-10}
+  DATAMEDIC_PARSE_MEMORY_LIMIT_MB: ${DATAMEDIC_PARSE_MEMORY_LIMIT_MB:-1500}
+  OPENBLAS_NUM_THREADS: "1"
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  ARROW_DEFAULT_MEMORY_POOL: system
+
+x-backend: &backend
+  build: ./backend
+  image: datamedic-backend:${DATAMEDIC_RELEASE:-latest}
+  restart: unless-stopped
+  environment: *backend-vars
+  volumes:
+    - storage:/data/storage
+  networks: [internal]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  db:
+    image: postgres:16.15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4.12-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--requirepass", "${REDIS_PASSWORD:?}"]
+    networks: [internal]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["sh", "-c", "python -m datamedic.db.bootstrap && alembic upgrade head"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    environment:
+      <<: *backend-vars
+      # Only Caddy can reach the API (internal network), so its forwarded headers are trusted.
+      FORWARDED_ALLOW_IPS: "*"
+      # Analytics Studio: at most 2 cached versions of up to 200,000 rows / 5,000,000 cells and
+      # 2 concurrent queries in the API process (docs/ARCHITECTURE.md "Analytics Studio").
+      DATAMEDIC_ANALYTICS_CACHE_ENTRIES: "2"
+      DATAMEDIC_ANALYTICS_MAX_CONCURRENCY: "2"
+    mem_limit: 1280m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker-ingest:
+    <<: *backend
+    environment:
+      <<: *backend-vars
+      DATAMEDIC_WORKER_MEMORY_LIMIT_MB: "0"
+    command: ["celery", "-A", "datamedic.workers.tasks", "worker", "-Q", "ingest",
+              "--concurrency", "1", "--hostname", "ingest@%h", "--loglevel", "INFO"]
+    mem_limit: 2g
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *backend
+    environment:
+      <<: *backend-vars
+      DATAMEDIC_WORKER_MEMORY_LIMIT_MB: ${DATAMEDIC_WORKER_MEMORY_LIMIT_MB:-1800}
+    command: ["celery", "-A", "datamedic.workers.tasks", "worker", "-Q", "analysis,evaluate,execute,maintenance",
+              "--concurrency", "1", "--hostname", "analysis@%h", "--loglevel", "INFO"]
+    mem_limit: 2304m
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  beat:
+    <<: *backend
+    command: ["celery", "-A", "datamedic.workers.tasks", "beat", "--loglevel", "INFO",
+              "--schedule", "/tmp/celerybeat-schedule"]
+    mem_limit: 256m
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        # Same origin: the browser calls https://<domain>/api/... through Caddy.
+        NEXT_PUBLIC_API_BASE_URL: https://${DATAMEDIC_DOMAIN:?}
+    image: datamedic-web:${DATAMEDIC_RELEASE:-latest}
+    restart: unless-stopped
+    networks: [internal]
+    mem_limit: 512m
+    depends_on: [api]
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DATAMEDIC_DOMAIN: ${DATAMEDIC_DOMAIN:?}
+      ACME_EMAIL: ${ACME_EMAIL:?}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [internal]
+    mem_limit: 256m
+    depends_on: [api, web]
+
+networks:
+  internal: {}
+
+volumes:
+  pgdata:
+  storage:
+  caddy_data:
+  caddy_config:

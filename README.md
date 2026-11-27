@@ -1,39 +1,161 @@
 # DataMedic
 
-Privacy-first, domain-aware data intelligence and ML reliability platform.
-Design documents live in [docs/](docs/); contributor and agent rules in [CLAUDE.md](CLAUDE.md).
+**A privacy-first, domain-aware data intelligence and ML reliability platform.**
 
-**Current status: Phase 1 (foundation).** Accounts, secure sessions, per-user isolation with
-PostgreSQL Row-Level Security, private storage, streamed uploads with content validation,
-background jobs and health checks. Parsing, diagnostics, preprocessing and ML arrive in later
-phases ([docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md)).
+DataMedic takes a tabular dataset from upload to a trustworthy, reproducible model evaluation:
+it profiles and diagnoses the data, lets you explore it interactively, tests preprocessing ideas
+without leakage, applies approved transformations as new immutable versions, trains baseline
+models with leakage-controlled evaluation, audits their reliability, and exports a consolidated
+Data Passport.
 
-## Repository layout
+> **Status (2026-11-27):** feature-complete and browser-verified locally; production deployment
+> configuration is ready ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)). **Not yet publicly deployed.**
+> This is a demonstration MVP: use synthetic or non-sensitive data. Biomedical features are for
+> research use only; DataMedic is not a medical device.
+
+## Why DataMedic
+
+Most analytics and AutoML tools make it easy to produce a number and hard to know whether to
+trust it. Common failure modes are silent: patients split across training and test folds,
+preprocessing fitted on all rows, identifiers used as predictors, imputation that hides
+informative missingness, tiny groups that identify people, and charts that mislead. DataMedic is
+built around the opposite defaults:
+
+- **Honest results.** A check that could not run is *not assessed*, never "passed". Statistical
+  suspicions are labelled as such. Exploratory evaluations are flagged as optimistic. There is no
+  single magic reliability score.
+- **Leakage control by construction.** Frozen, group- and time-aware folds; every learned step
+  fitted on training rows only; committed full-data steps replayed inside folds or blocked.
+- **Privacy first.** Per-user isolation enforced by PostgreSQL Row-Level Security, private
+  storage, protection of sensitive columns across versions and results, small-group suppression,
+  and no dataset content sent to external services.
+- **Reproducibility.** Immutable versions with content hashes, hash-bound approvals, recorded seeds
+  and library versions, and generated Python code for every version.
+
+## Key features
+
+| Area | What it does |
+|---|---|
+| **Upload & versions** | CSV/TSV, XLSX/XLS, Parquet and JSON parsed in a resource-limited sandbox into immutable versions; previews; background profiling. |
+| **Diagnostics** | Universal checks plus biomedical, financial, business and industrial modules driven by declared column roles, with evidence, severity, limitations and suggested actions. |
+| **Analytics Studio** | No-code chart builder (bar, horizontal/grouped/stacked bar, line, area, scatter, bubble, histogram, box, pie/donut, correlation and missingness heatmaps, tables) with filters, recommendations and misleading-chart guards; KPI cards; pivot tables with totals; saved dashboards bound to immutable versions; automated evidence-based insights; visual version comparison; PNG/SVG/CSV/JSON exports. |
+| **Biomedical Intelligence Lite** | Patients and repeated observations, target balance, biomarker distributions and outliers, patient-level comparisons with effect sizes and Benjamini–Hochberg q-values, site/batch effects, confounding warnings, patient-leakage checks. Research use only; groups under 10 suppressed. |
+| **Intelligent preprocessing & Experiment Lab** | Operation catalogue with risk and stage flags, evidence-based recommendations, side-by-side comparison of candidate pipelines on one frozen split, impact previews, hash-bound approvals, commits into new versions, revert, before/after comparison and `pipeline.py`. |
+| **AutoML & Reliability Auditor** | Binary, multiclass and regression baselines (dummy, linear, random forest, gradient boosting) with bounded nested selection, fold dispersion and bootstrap intervals, ROC/PR/calibration/residual charts, permutation importance, error slices, and a 20-check reliability audit. No trained model is persisted. |
+| **Analytical Copilot** | A **rule-based**, read-only assistant: analytical questions ("average amount by region", "histogram of age", "monthly trend") become validated queries whose numbers come from the query engine, with the interpreted query and a chart; report questions are answered from stored results with references. No language model, no API key. |
+| **Data Passport & exports** | One consolidated report (quality, findings, recommendations, provenance and hashes, experiments, models, audits, explainability, insights, dashboards, limitations) with print-to-PDF, plus a JSON report, `pipeline.py` and an acknowledged, formula-safe CSV export. |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  B[Browser] -- HTTPS --> C[Caddy<br/>reverse proxy, TLS]
+  C -- "/" --> W[Next.js 16 web app]
+  C -- "/api, /healthz" --> A[FastAPI API<br/>auth, RLS session, analytics queries]
+  A --> P[(PostgreSQL 16<br/>Row-Level Security)]
+  A -- job_id only --> R[(Redis broker)]
+  R --> WI[Celery worker: ingest<br/>parse sandbox]
+  R --> WA[Celery worker: analysis<br/>profiling, diagnostics, Lab,<br/>training, audits, insights, exports]
+  BT[Celery beat<br/>maintenance] --> R
+  WI --> S[(Private storage volume)]
+  WA --> S
+  A --> S
+  WI --> P
+  WA --> P
+```
+
+Only Caddy is exposed in production; the database, Redis, API, workers and web server stay on an
+internal network. Broker messages carry only a job id. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Technology stack
+
+- **Backend:** Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, Celery, Redis, PostgreSQL 16 (RLS), pandas, NumPy, PyArrow, SciPy, scikit-learn, imbalanced-learn; uv for dependency locking.
+- **Frontend:** Next.js 16, React 19, TypeScript (strict), Tailwind CSS 4, shadcn/ui, TanStack Query, Recharts, an OpenAPI-generated typed client.
+- **Infrastructure:** Docker Compose (development and production), Caddy (automatic HTTPS), Mailpit (local email).
+- **Quality:** pytest (unit + PostgreSQL integration, RLS and AuthZ matrix), Vitest, ruff, mypy (strict), ESLint, TypeScript.
+
+## Project structure
 
 ```
-docker-compose.yml        local stack: postgres, redis, mailpit, migrate, api, worker, beat, web
-.env.example              every setting (copy to .env)
+docker-compose.yml        local stack: postgres, redis, mailpit, migrate, api, worker-ingest, worker, beat, web
+docker-compose.prod.yml   production stack behind Caddy (see docs/DEPLOYMENT.md)
+deploy/                   Caddyfile, .env.production.example, backup.sh
+.env.example              every development setting (copy to .env)
 backend/                  FastAPI API + Celery workers (Python 3.12, uv)
   src/datamedic/
-    api/                  app factory, middleware, dependencies, health
-    auth/                 signup, email verification, login, sessions, password reset
-    datasets/             dataset API, streamed upload, file validation, job handlers
-    jobs/                 job service, publisher (broker messages carry only job_id), API
-    workers/              Celery app, job runner (claim_job + RLS), maintenance tasks
-    db/                   models, RLS session hook, role bootstrap
-    storage/              private storage interface + local filesystem adapter
-    security/             Argon2id passwords, tokens
-  migrations/             Alembic (0001: tables, RLS policies, triggers, grants, claim_job)
-  tests/unit, tests/integration
-apps/web/                 Next.js 16 + TypeScript + Tailwind + shadcn/ui
-  src/app/                routes: /, /login, /signup, /verify-email, /reset-password,
-                          /datasets, /datasets/[datasetId], /settings/security
-  src/lib/api/            generated OpenAPI types + typed client
+    api/ auth/ jobs/ workers/ db/ storage/ security/   platform: app, sessions, jobs, RLS, private storage
+    datasets/ versions/   upload, parse sandbox, immutable versions, previews, profiles
+    engine/               pure analysis engine: checks, preprocessing, ML, biomedical, analytics
+    domains/              biomedical, financial, business, industrial modules
+    analyses/             roles and diagnostics
+    recommendations/ experiments/ pipelines/ preprocessing/   preprocessing and Experiment Lab
+    training/             training runs, reliability audits, sensitive-column protection
+    biomedical/           Biomedical Intelligence Lite
+    analytics/            Analytics Studio API, dashboards, insights, natural-language parser
+    reports/ exports/     Data Passport, Copilot, exports
+  migrations/             Alembic 0001–0009 (expand-only)
+  tests/unit, tests/integration, tests/fixtures (synthetic only)
+apps/web/                 Next.js app (routes under src/app, components under src/components)
+docs/                     PRD, architecture, API, database, privacy, ML engine, domains, roadmap, deployment
 ```
+
+## Verified test results (2026-11-27)
+
+| Suite | Result |
+|---|---|
+| Backend full regression (Phase 5 closure) | 1,523 passed, 4 skipped; one pre-existing flaky test fixed and re-run green |
+| Backend Phase 8 regression (unit suite + analytics, MVP, isolation-matrix, database-security and related integration suites) | 1,447 passed, 4 skipped, 0 failed |
+| Final closure targeted tests | backend 44 unit + 13 integration passed; frontend 105 passed (18 files) |
+| Static checks | ruff, format, strict mypy, TypeScript, ESLint, production builds — all pass |
+| Live end-to-end smoke (dev stack) | 15/15 Analytics Studio checks; 22/22 MVP checks |
+| Production rehearsal (`docker-compose.prod.yml`, HTTPS via Caddy, clean database) | 22/22 and 14/14 |
+
+The 4 skips are pre-existing parametrisations (`tests/unit/test_check_framework.py:91`).
+
+## Privacy and security safeguards
+
+- Identity from a server-side session cookie only (`__Host-`, Secure, HttpOnly, SameSite); CSRF tokens on unsafe requests; Argon2id passwords; email verification before uploads.
+- Owner scoping in the service layer **and** PostgreSQL Row-Level Security; another user's resource returns 404; an auto-generated AuthZ matrix covers every route.
+- Private, write-once storage with opaque keys; no public file URLs; downloads only through authorised endpoints with `Cache-Control: no-store`.
+- Sensitive columns (sensitive on any version, or derived from one) are protected in results, analytics (count-only), the Copilot, the passport and exports; small groups (< 10) are suppressed in privacy mode; scatter plots are binned there.
+- No SQL or code accepted from users (structured query specifications only); spreadsheet formula injection neutralised in exports.
+- No external AI or analytics services receive dataset content; logs carry ids and codes, not values or column names.
+- Full details: [docs/PRIVACY_AND_SECURITY.md](docs/PRIVACY_AND_SECURITY.md).
+
+## Scientific limitations
+
+- Results describe the uploaded data only; associations are not causal; no external validation exists.
+- "Leakage-controlled" covers the implemented split and preprocessing safeguards, not external validity, absence of bias or clinical reliability. Choosing the highest of several scores is optimistic.
+- Statistical tests assume independence unless an entity role is declared; temporal tests can overstate evidence under autocorrelation.
+- Small-group suppression does not protect against differencing across many queries; no differential privacy is claimed.
+- The Copilot understands a fixed set of question patterns; it is not a generative model.
+- Analytics are limited to versions of up to 200,000 rows / 5 million cells on a single server.
+
+## Future enhancements
+
+Optional, privacy-safe external or local language models for the Copilot (evaluated against a
+labelled question set), public dashboard sharing with access controls, server-side PDF rendering,
+a nonce-based Content Security Policy, horizontal scaling, and advanced omics analyses. See
+[docs/IMPLEMENTATION_ROADMAP.md](docs/IMPLEMENTATION_ROADMAP.md).
+
+## Production deployment
+
+DataMedic deploys to a single Ubuntu server with Docker Compose, Caddy and automatic HTTPS
+(4 vCPU / 8 GB RAM recommended). Step-by-step instructions, sizing, hosting options, backups,
+restore and rollback: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
+```bash
+cp deploy/.env.production.example .env.production   # fill in every value; never commit it
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+```
+
+Contributor and agent rules: [CLAUDE.md](CLAUDE.md).
 
 ---
 
-## Option A — Run everything with Docker Desktop (recommended)
+## Local installation
+
+### Option A — Run everything with Docker Desktop (recommended)
 
 Requirements: Windows 10/11 with [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) (WSL 2 backend).
 
@@ -58,17 +180,17 @@ Mailpit, click the link, sign in, and upload a CSV/XLSX/XLS/Parquet/JSON file (m
 
 Stop with `Ctrl+C`; remove all data with `docker compose down -v`.
 
-> The Docker setup was written in Phase 1 but **could not be executed on the development
-> machine** (Docker was not installed). Treat the first `docker compose up` as a check.
+After pulling new code, run `docker compose up --build` again: the `migrate` service applies new
+database migrations automatically, and existing data is kept.
 
 ---
 
-## Option B — Run without Docker (Windows)
+### Option B — Run without Docker (Windows)
 
 Use this if Docker is not available. Background jobs run in-process
 (`DATAMEDIC_JOBS_EAGER=true`, development only), so Redis is not needed.
 
-### 1. Install prerequisites
+#### 1. Install prerequisites
 
 ```powershell
 # uv (Python package manager): https://docs.astral.sh/uv/getting-started/installation/
@@ -80,7 +202,7 @@ uv python install 3.12
 #   During install, set a password for the "postgres" superuser and keep port 5432.
 ```
 
-### 2. Configure
+#### 2. Configure
 
 ```powershell
 Copy-Item .env.example .env
@@ -97,7 +219,7 @@ DATAMEDIC_EMAIL_BACKEND=console
 
 (`console` prints verification links in the API terminal instead of sending email.)
 
-### 3. Backend
+#### 3. Backend
 
 ```powershell
 cd backend
@@ -109,7 +231,7 @@ uv run uvicorn datamedic.api.app:create_app --factory --host 127.0.0.1 --port 80
 
 Check: http://127.0.0.1:8000/readyz should return `{"status":"ok", ...}`.
 
-### 4. Frontend (second PowerShell window)
+#### 4. Frontend (second PowerShell window)
 
 ```powershell
 cd apps\web
@@ -119,14 +241,14 @@ npm run dev
 
 Open http://localhost:3000. The verification link appears in the backend terminal.
 
-### Optional: a real worker without Docker
+#### Optional: a real worker without Docker
 
 Redis does not run natively on Windows; use WSL or Docker for it. With Redis on
 `localhost:6379` and `DATAMEDIC_JOBS_EAGER=false`:
 
 ```powershell
 cd backend
-uv run celery -A datamedic.workers.tasks worker -Q ingest,maintenance --pool=solo --loglevel INFO
+uv run celery -A datamedic.workers.tasks worker -Q ingest,analysis,evaluate,execute,maintenance --pool=solo --loglevel INFO
 uv run celery -A datamedic.workers.tasks beat --loglevel INFO
 ```
 
@@ -134,23 +256,65 @@ uv run celery -A datamedic.workers.tasks beat --loglevel INFO
 
 ---
 
+## Resource limits
+
+Docker Compose is sized for a Docker VM with about 8 GB of memory.
+
+| Service | Runs | Concurrency | Memory cap |
+|---|---|---|---|
+| `worker-ingest` | upload validation + parsing (queue `ingest`) | 1 | each parse runs in a sandbox process capped at `DATAMEDIC_PARSE_MEMORY_LIMIT_MB` (default 2500); container 3 GB |
+| `worker` | profiling, diagnostics, experiments, impact previews, commits, reverts, version comparisons, maintenance (queues `analysis`, `evaluate`, `execute`, `maintenance`) | 1 | each worker process capped at `DATAMEDIC_WORKER_MEMORY_LIMIT_MB` (default 2000, `RLIMIT_DATA`); container 2.5 GB |
+
+A job that reaches its cap fails with `LIMIT_EXCEEDED` (not a crash), and the dataset stays
+recoverable. Measured at the 20-million-cell limit: parsing about 50 s, profiling about 1 GB.
+
+To change the caps, set the variables in `.env` and run `docker compose up -d` again:
+
+- **More memory available:** raise both caps, or raise `--concurrency` for `worker` in `docker-compose.yml`. Keep the sum of (concurrency × cap) plus about 1.5 GB for the other services below the Docker VM's memory.
+- **Less memory:** lower the caps. Large files then fail with `LIMIT_EXCEEDED` instead of exhausting the VM.
+
+Stuck work is recovered automatically every minute by the `beat` service:
+- Jobs whose heartbeat is older than their time limit plus 5 minutes are failed (`JOB_STALE`).
+- A dataset left in "validating" with no active ingest job becomes "Parse failed", and **Retry parsing** works.
+- An upload interrupted for over an hour (`DATAMEDIC_UPLOAD_STALE_AFTER_SECONDS`) is reopened for upload.
+
 ## Tests and checks
 
 Backend (from `backend/`):
 
 ```powershell
 uv run pytest tests/unit                       # no database needed
-$env:TEST_ADMIN_DATABASE_URL = "postgresql://postgres:<password>@127.0.0.1:5432/postgres"
+$env:TEST_ADMIN_DATABASE_URL = "postgresql://dm_test_admin:<password>@127.0.0.1:55432/postgres"
 uv run pytest                                  # unit + integration (creates and drops a temp database)
 uv run ruff check src migrations tests
 uv run ruff format --check src migrations tests
 uv run mypy
 ```
 
-Integration tests need a PostgreSQL superuser URL because they create the `dm_*` roles and a
-throwaway database. With Docker: `docker compose up -d db` and use
-`postgresql://postgres:<POSTGRES_PASSWORD>@127.0.0.1:5432/postgres` after adding
-`ports: ["127.0.0.1:5432:5432"]` to the `db` service.
+### Disposable test database
+
+Integration tests (RLS, isolation matrix, jobs) must not be skipped. They need
+`TEST_ADMIN_DATABASE_URL`: an administrator of a **dedicated, disposable** PostgreSQL instance.
+Never point it at the application's database or at production credentials.
+
+Required permissions: the test harness creates the `dm_migrator`, `dm_app` and
+`dm_maintenance` roles and a database named `datamedic_test_<random>` (dropped afterwards).
+`dm_maintenance` has `BYPASSRLS`, and PostgreSQL 16 lets only a **superuser** create such a role,
+so the test administrator must be a superuser **of the disposable instance only**. The
+application roles themselves are created `NOSUPERUSER`, and RLS is tested exactly as in production.
+
+A throwaway instance with Docker (data in memory, reachable only from this machine):
+
+```powershell
+$pw = [guid]::NewGuid().ToString("N")
+docker run -d --name datamedic-testdb -e POSTGRES_USER=dm_test_admin -e POSTGRES_PASSWORD=$pw `
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:16.15-alpine
+$env:TEST_ADMIN_DATABASE_URL = "postgresql://dm_test_admin:$pw@127.0.0.1:55432/postgres"
+# ... run the tests ...
+docker rm -f datamedic-testdb   # removes the instance and all its data
+```
+
+Keep the URL in a local environment variable only; do not commit it or put it in `.env`.
 
 Frontend (from `apps/web/`):
 
@@ -180,3 +344,8 @@ cd ../apps/web; npm run gen:api
   inspected for macros, external links, unsafe paths and zip-bomb ratios.
 - Broker messages contain only `{"job_id": ...}`; logs are scrubbed of dataset content.
 - Secrets live only in environment variables (`.env`, never committed).
+- Sensitive columns (sensitive on any version of a dataset, or derived from one) are protected in
+  training results, biomedical summaries, the passport and exports; exports require explicit
+  acknowledgement and are served only through an authorised download (`Cache-Control: no-store`).
+- Production (docs/DEPLOYMENT.md): only Caddy is exposed (HTTPS); secure `__Host-` cookies;
+  authenticated TLS SMTP is mandatory; database and Redis are never published.

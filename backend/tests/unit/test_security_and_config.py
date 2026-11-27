@@ -45,7 +45,10 @@ def test_production_guards() -> None:
         _settings(environment="production", jobs_eager=True)
     with pytest.raises(ValidationError):
         _settings(environment="production", email_backend="console")
-    assert _settings(environment="production").session_cookie_name == "__Host-dm_session"
+    with pytest.raises(ValidationError):  # plaintext SMTP refused in production
+        _settings(environment="production")
+    prod = _settings(environment="production", smtp_security="starttls")
+    assert prod.session_cookie_name == "__Host-dm_session"
     assert _settings(cookie_secure=False).session_cookie_name == "dm_session"
 
 

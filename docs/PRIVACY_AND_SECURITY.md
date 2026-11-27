@@ -110,7 +110,26 @@ Plan limits (PRD §6.13) bound storage, upload size, cells, columns, versions, r
 
 ## 7. HTTP security headers
 
-HSTS (production), nonce-based `Content-Security-Policy` with `frame-ancestors 'none'` and `connect-src` restricted to the API origin, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and `Cache-Control: no-store` on data-bearing responses. CORS allows only the web origin, with credentials. Nonce-based CSP makes Next.js pages render dynamically, which is an accepted performance trade-off.
+HSTS (production), a `Content-Security-Policy` with `frame-ancestors 'none'` and `connect-src 'self'` (same-origin API) set by the production reverse proxy (`deploy/Caddyfile`; `script-src` currently allows `'unsafe-inline'` for Next.js bootstrap scripts — a nonce-based CSP is planned, see DEPLOYMENT.md §5; correction recorded 2026-11-26), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, a restrictive `Permissions-Policy`, and `Cache-Control: no-store` on data-bearing responses. CORS allows only the web origin, with credentials. Nonce-based CSP makes Next.js pages render dynamically, which is an accepted performance trade-off.
+
+## 7a. Phase 5 safeguards (training and reliability audit)
+
+- Every new row is owner-scoped with RLS; every new route is in the isolation matrix (404 across users).
+- Responses carry aggregates only: bounded curves, binned grids, fold statistics, importance per column,
+  error slices with at least 30 rows and never for sensitive-role columns. Class names of a sensitive target
+  are replaced by "class 1, 2, …"; regression charts withhold axis values for a sensitive target.
+- **Sensitivity across role changes (closure 2026-11-26, `training/privacy.py`).** A column is protected
+  when it was sensitive in the run's training-time roles, is sensitive now on any version of the dataset,
+  or was derived from such a column by committed steps. Protection is applied when a run is created
+  (the engine never slices it) and again whenever results are served (error slices withheld; protected
+  target: class names and residual axis values withheld). It is enforced in the API, not by the frontend;
+  stored results and provenance are never rewritten, and the response discloses what was withheld.
+- Out-of-fold predictions are a platform-written Parquet artifact, owner only and never served; no trained
+  model, pickle or joblib file is created.
+- Error messages from libraries are reduced to engine codes or exception types; logs carry ids, codes and
+  counts only.
+- Broker messages carry only the job id; parameters live in `jobs.params` and the run configuration.
+- No new dependency and no external service.
 
 ## 8. Verification summary (MVP)
 
@@ -121,3 +140,20 @@ HSTS (production), nonce-based `Content-Security-Policy` with `frame-ancestors '
 | Original immutability | No-write-path test, trigger test, hash-on-read test |
 | Approval enforcement | API and worker bypass tests |
 | Malicious inputs | Malicious fixture suite |
+
+## 7b. MVP completion safeguards (2026-11-26)
+
+- Owner policy (approved 2026-11-26): a column marked sensitive on any version of a dataset, or derived from one by committed steps, stays protected across historical and future training results, the biomedical summary (labels replaced, no per-category values), the Data Passport and exports.
+- Biomedical summaries are aggregates only; groups with fewer than 10 units are suppressed.
+- CSV exports need an explicit row-level acknowledgement; sensitive columns (including `bio.patient_id`, a sensitive role) are dropped unless a second acknowledgement includes them; text cells starting with `= + - @`, tab or CR are prefixed with an apostrophe; files are downloaded only through the authorised endpoint with sanitised filenames and `no-store`.
+- The Copilot is rule-based and in-process: no external model, no API key, nothing leaves the platform. An external LLM, if ever added, must be opt-in, server-side, and receive no rows, column names, identifiers or sensitive values.
+- Production: Caddy is the only exposed service (HTTPS, HSTS); `__Host-` Secure cookies; Redis requires a password; plaintext SMTP is refused in production; secrets live only in `.env.production` (mode 600, never committed). Until the deployed instance passes the checklist in docs/DEPLOYMENT.md §5, it is for synthetic or non-sensitive demonstration data only.
+
+## 7c. Analytics Studio safeguards (Phase 8, 2026-11-27)
+
+- No SQL, expressions, paths, URLs or code are accepted: queries are validated structured specifications (ARCHITECTURE.md §18).
+- Protected columns can only be counted or tested for missingness: never grouped, filtered by value, plotted, aggregated, shown in tooltips or returned by the Copilot.
+- Privacy mode (biomedical datasets or any protected column): cells under 10 rows suppressed, secondary suppression, whole-result suppression for filtered cohorts under 10, binned scatter plots instead of points.
+- Exports are aggregate-only (no scatter points), formula-neutralised and served with sanitised filenames and `no-store`; dashboard JSON contains configuration only. No public dashboard sharing.
+- The Copilot's language layer is deterministic and local; nothing is sent to external services.
+- Residual risk (documented, not solved): repeated overlapping queries could narrow small groups by differencing. No differential privacy or anonymisation is claimed.

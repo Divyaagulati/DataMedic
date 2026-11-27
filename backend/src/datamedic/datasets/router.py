@@ -11,27 +11,35 @@ from datamedic.datasets.schemas import (
     DatasetCreateIn,
     DatasetListOut,
     DatasetOut,
+    DatasetPatchIn,
     DeletionAcceptedOut,
+    ParseAcceptedOut,
     UploadAcceptedOut,
 )
-from datamedic.db.models import Dataset
+from datamedic.db.models import Dataset, DatasetVersion
 from datamedic.errors import LengthRequired, UploadTooLarge, ValidationFailed
 from datamedic.jobs.publisher import publish_committed
 from datamedic.jobs.schemas import JobOut
 from datamedic.storage import raw_object_key
+from datamedic.versions import service as versions_service
+from datamedic.versions.schemas import VersionListOut, VersionSummaryOut
 
 router = APIRouter(prefix="/api/v1/datasets", tags=["datasets"])
 
 
-def _out(ds: Dataset, detected_format: str | None) -> DatasetOut:
+def _out(
+    ds: Dataset, detected_format: str | None, head: DatasetVersion | None = None
+) -> DatasetOut:
     return DatasetOut(
         id=ds.id,
         name=ds.name,
         domain=ds.domain,
+        domain_changed_at=ds.domain_changed_at,
         status=ds.status,
         filename=ds.declared_filename,
         size_bytes=ds.declared_size_bytes,
         detected_format=detected_format,
+        head_version=VersionSummaryOut.from_version(head) if head else None,
         created_at=ds.created_at,
     )
 
@@ -49,13 +57,47 @@ def create_dataset(
 @router.get("")
 def list_datasets(principal: PrincipalDep, db: DbDep) -> DatasetListOut:
     rows = service.list_datasets(db, principal.user.id)
-    return DatasetListOut(items=[_out(ds, fmt) for ds, fmt in rows])
+    return DatasetListOut(items=[_out(ds, fmt, head) for ds, fmt, head in rows])
 
 
 @router.get("/{dataset_id}")
 def get_dataset(dataset_id: uuid.UUID, principal: PrincipalDep, db: DbDep) -> DatasetOut:
     ds = service.get_owned(db, principal.user.id, dataset_id)
-    return _out(ds, service.detected_format(db, ds.id))
+    return _out(ds, service.detected_format(db, ds.id), service.head_version(db, ds))
+
+
+@router.patch("/{dataset_id}")
+def update_dataset(
+    dataset_id: uuid.UUID, body: DatasetPatchIn, principal: PrincipalDep, db: DbDep
+) -> DatasetOut:
+    """Rename the dataset or change its domain. A domain change makes existing
+    diagnostics stale and removes access to the old domain's roles in new runs."""
+    from datamedic.analyses.service import update_dataset as update
+
+    ds = update(db, principal.user.id, dataset_id, body.name, body.domain)
+    return _out(ds, service.detected_format(db, ds.id), service.head_version(db, ds))
+
+
+@router.get("/{dataset_id}/versions")
+def list_versions(dataset_id: uuid.UUID, principal: PrincipalDep, db: DbDep) -> VersionListOut:
+    ds = service.get_owned(db, principal.user.id, dataset_id)
+    versions = versions_service.list_versions(db, principal.user.id, ds.id)
+    return VersionListOut(items=[VersionSummaryOut.from_version(v) for v in versions])
+
+
+@router.post("/{dataset_id}/parse", status_code=status.HTTP_202_ACCEPTED)
+def queue_parse(
+    dataset_id: uuid.UUID, principal: VerifiedPrincipalDep, db: DbDep, ctx: CtxDep
+) -> ParseAcceptedOut:
+    """Parse a stored upload that has no version yet (status validated or parse_failed)."""
+    ds, job = service.queue_parse(db, ctx.settings, principal.user.id, dataset_id)
+    publish_committed(db, ctx.require_publisher(), job.id, job.type)
+    db.refresh(ds)
+    db.refresh(job)
+    return ParseAcceptedOut(
+        dataset=_out(ds, service.detected_format(db, ds.id), service.head_version(db, ds)),
+        job=JobOut.from_job(job),
+    )
 
 
 @router.put(

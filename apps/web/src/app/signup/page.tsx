@@ -39,9 +39,10 @@ export default function SignupPage() {
   }
 
   return (
-    <Card className="mx-auto max-w-md">
+    <Card className="mx-auto mt-6 max-w-md border-t-4 border-t-[var(--brand-teal)] shadow-lg">
       <CardHeader>
-        <CardTitle>Create your account</CardTitle>
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary">DataMedic</p>
+        <CardTitle className="text-xl">Create your account</CardTitle>
       </CardHeader>
       <CardContent>
         {done ? (

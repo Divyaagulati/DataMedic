@@ -40,7 +40,34 @@ export function DatasetsView() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Datasets</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Datasets</h1>
+          <p className="text-sm text-muted-foreground">
+            Upload → Understand → Diagnose → Experiment → Transform → Train → Audit → Export
+          </p>
+        </div>
+        {datasets.data?.length ? (
+          <div className="flex gap-3 text-sm">
+            <div className="rounded-lg border bg-card px-4 py-2">
+              <p className="text-xs text-muted-foreground">Datasets</p>
+              <p className="text-lg font-semibold tabular-nums">{datasets.data.length}</p>
+            </div>
+            <div className="rounded-lg border bg-card px-4 py-2">
+              <p className="text-xs text-muted-foreground">Ready</p>
+              <p className="text-lg font-semibold tabular-nums">
+                {datasets.data.filter((d) => d.status === "ready").length}
+              </p>
+            </div>
+            <div className="rounded-lg border bg-card px-4 py-2">
+              <p className="text-xs text-muted-foreground">Rows</p>
+              <p className="text-lg font-semibold tabular-nums">
+                {datasets.data.reduce((n, d) => n + (d.head_version?.n_rows ?? 0), 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </div>
       {!user.email_verified ? (
         <FormNotice message="Verify your email address (check your inbox) before uploading data." />
       ) : (
@@ -57,7 +84,10 @@ export function DatasetsView() {
           {datasets.isPending ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : !datasets.data || datasets.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No datasets yet.</p>
+            <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">No datasets yet</p>
+              <p>Upload a CSV, Excel, Parquet or JSON file above. Use synthetic or non-sensitive data in this demo.</p>
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -65,6 +95,7 @@ export function DatasetsView() {
                   <TableHead>Name</TableHead>
                   <TableHead>File</TableHead>
                   <TableHead>Size</TableHead>
+                  <TableHead>Rows × columns</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -72,12 +103,17 @@ export function DatasetsView() {
                 {datasets.data.map((d) => (
                   <TableRow key={d.id}>
                     <TableCell>
-                      <Link href={`/datasets/${d.id}`} className="font-medium underline">
+                      <Link href={`/datasets/${d.id}`} className="font-medium text-primary hover:underline">
                         {d.name}
                       </Link>
                     </TableCell>
                     <TableCell className="text-muted-foreground">{d.filename}</TableCell>
                     <TableCell>{formatBytes(d.size_bytes)}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {d.head_version
+                        ? `${d.head_version.n_rows.toLocaleString()} × ${d.head_version.n_cols}`
+                        : "—"}
+                    </TableCell>
                     <TableCell>
                       <StatusBadge status={d.status} />
                     </TableCell>

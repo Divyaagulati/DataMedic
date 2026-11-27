@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from datamedic.jobs.schemas import JobOut
+from datamedic.versions.schemas import VersionSummaryOut
 
 
 class DatasetCreateIn(BaseModel):
@@ -15,14 +16,23 @@ class DatasetCreateIn(BaseModel):
     size_bytes: int = Field(gt=0)
 
 
+class DatasetPatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    domain: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 class DatasetOut(BaseModel):
     id: uuid.UUID
     name: str
     domain: str
+    domain_changed_at: datetime | None
     status: str
     filename: str
     size_bytes: int
     detected_format: str | None
+    head_version: VersionSummaryOut | None
     created_at: datetime
 
 
@@ -36,6 +46,11 @@ class DatasetListOut(BaseModel):
 
 
 class UploadAcceptedOut(BaseModel):
+    dataset: DatasetOut
+    job: JobOut
+
+
+class ParseAcceptedOut(BaseModel):
     dataset: DatasetOut
     job: JobOut
 

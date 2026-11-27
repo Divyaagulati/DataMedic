@@ -2,9 +2,7 @@
 # Secrets come from .env. Only web (3000), api (8000) and the Mailpit UI (8025) are published,
 # and only on 127.0.0.1. PostgreSQL, Redis and storage stay on the internal network.
 
-x-backend-env: &backend-env
-  env_file: .env
-  environment:
+x-backend-vars: &backend-vars
     DATAMEDIC_DATABASE_URL: postgresql+psycopg://dm_app:${DATAMEDIC_DB_APP_PASSWORD}@db:5432/datamedic
     DATAMEDIC_MAINTENANCE_DATABASE_URL: postgresql+psycopg://dm_maintenance:${DATAMEDIC_DB_MAINTENANCE_PASSWORD}@db:5432/datamedic
     DATAMEDIC_MIGRATION_DATABASE_URL: postgresql+psycopg://dm_migrator:${DATAMEDIC_DB_MIGRATOR_PASSWORD}@db:5432/datamedic
@@ -15,6 +13,21 @@ x-backend-env: &backend-env
     DATAMEDIC_SMTP_HOST: mailpit
     DATAMEDIC_SMTP_PORT: "1025"
     DATAMEDIC_EMAIL_BACKEND: smtp
+    # Native libraries single-threaded: predictable memory under the caps below.
+    OPENBLAS_NUM_THREADS: "1"
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    ARROW_DEFAULT_MEMORY_POOL: system
+
+x-backend-env: &backend-env
+  env_file: .env
+  environment: *backend-vars
+
+# Resource limits (README "Resource limits"); sized for a Docker VM with ~8 GB of memory.
+# worker-ingest: one parse at a time; each parse runs in a sandbox capped at
+#   DATAMEDIC_PARSE_MEMORY_LIMIT_MB (default 2500). Container cap 3 GB.
+# worker: analysis (profiling, diagnostics) and maintenance, one job at a time, each worker
+#   process capped at DATAMEDIC_WORKER_MEMORY_LIMIT_MB (default 2000). Container cap 2.5 GB.
 
 services:
   db:
@@ -65,11 +78,36 @@ services:
       redis:
         condition: service_healthy
 
+  worker-ingest:
+    build: ./backend
+    env_file: .env
+    environment:
+      <<: *backend-vars
+      # No in-process cap here: limits are inherited by child processes, and the parse
+      # sandbox applies its own (DATAMEDIC_PARSE_MEMORY_LIMIT_MB).
+      DATAMEDIC_WORKER_MEMORY_LIMIT_MB: "0"
+    command: ["celery", "-A", "datamedic.workers.tasks", "worker", "-Q", "ingest",
+              "--concurrency", "1", "--hostname", "ingest@%h", "--loglevel", "INFO"]
+    mem_limit: 3g
+    restart: unless-stopped
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   worker:
     build: ./backend
-    <<: *backend-env
-    command: ["celery", "-A", "datamedic.workers.tasks", "worker", "-Q", "ingest,maintenance",
-              "--concurrency", "2", "--loglevel", "INFO"]
+    env_file: .env
+    environment:
+      <<: *backend-vars
+      DATAMEDIC_WORKER_MEMORY_LIMIT_MB: ${DATAMEDIC_WORKER_MEMORY_LIMIT_MB:-2000}
+    command: ["celery", "-A", "datamedic.workers.tasks", "worker", "-Q", "analysis,evaluate,execute,maintenance",
+              "--concurrency", "1", "--hostname", "analysis@%h", "--loglevel", "INFO"]
+    mem_limit: 2560m
+    restart: unless-stopped
     volumes:
       - storage:/data/storage
     depends_on:

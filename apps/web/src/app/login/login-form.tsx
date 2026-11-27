@@ -44,9 +44,10 @@ export function LoginForm() {
   }
 
   return (
-    <Card className="mx-auto max-w-md">
+    <Card className="mx-auto mt-6 max-w-md border-t-4 border-t-[var(--brand-teal)] shadow-lg">
       <CardHeader>
-        <CardTitle>Sign in</CardTitle>
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary">DataMedic</p>
+        <CardTitle className="text-xl">Sign in</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">

@@ -49,30 +49,33 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* DataMedic design system: deep navy primary, teal accent, slate neutrals. */
+  --background: oklch(0.985 0.004 250);
+  --foreground: oklch(0.21 0.03 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.03 260);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.21 0.03 260);
+  --primary: oklch(0.32 0.08 258);
+  --primary-foreground: oklch(0.98 0.005 250);
+  --secondary: oklch(0.95 0.02 195);
+  --secondary-foreground: oklch(0.3 0.06 200);
+  --muted: oklch(0.96 0.006 250);
+  --muted-foreground: oklch(0.5 0.02 255);
+  --accent: oklch(0.93 0.04 190);
+  --accent-foreground: oklch(0.28 0.06 200);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
+  --border: oklch(0.91 0.01 250);
+  --input: oklch(0.91 0.01 250);
+  --ring: oklch(0.62 0.11 195);
+  --brand-teal: oklch(0.66 0.12 190);
+  --brand-navy: oklch(0.24 0.06 260);
+  --chart-1: oklch(0.66 0.12 190);
+  --chart-2: oklch(0.45 0.1 258);
+  --chart-3: oklch(0.7 0.13 70);
+  --chart-4: oklch(0.6 0.15 300);
+  --chart-5: oklch(0.55 0.02 255);
+  --radius: 0.65rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -126,5 +129,82 @@
   }
   html {
     @apply font-sans;
+  }
+}
+/* Chart roles (validated reference palette; see docs/ARCHITECTURE.md §6.3). Text never
+   wears a series color: labels use the normal foreground tokens. */
+:root {
+  --viz-surface: #fcfcfb;
+  --viz-grid: #e1e0d9;
+  --viz-axis: #c3c2b7;
+  --viz-seq: #2a78d6; /* single-hue magnitude (blue) */
+  --viz-seq-muted: #cde2fb;
+  --viz-div-neg: #2a78d6; /* diverging: negative pole */
+  --viz-div-mid: #f0efec; /* diverging: neutral midpoint */
+  --viz-div-pos: #e34948; /* diverging: positive pole */
+  --viz-cat-1: #2a78d6;
+  --viz-cat-2: #eb6834;
+  --viz-cat-3: #1baf7a;
+  --viz-cat-4: #eda100;
+  --viz-cat-5: #e87ba4;
+  --viz-cat-6: #008300;
+  --viz-cat-7: #6250d6;
+}
+.dark {
+  --viz-surface: #1a1a19;
+  --viz-grid: #2c2c2a;
+  --viz-axis: #383835;
+  --viz-seq: #3987e5;
+  --viz-seq-muted: #184f95;
+  --viz-div-neg: #3987e5;
+  --viz-div-mid: #383835;
+  --viz-div-pos: #e66767;
+  --viz-cat-1: #3987e5;
+  --viz-cat-2: #d95926;
+  --viz-cat-3: #199e70;
+  --viz-cat-4: #c98500;
+  --viz-cat-5: #d55181;
+  --viz-cat-6: #008300;
+  --viz-cat-7: #9085e9;
+}
+
+/* Severity (status palette: reserved for state, never for data series; always shown with a
+   text label and an icon, never colour alone). */
+:root {
+  --sev-critical: #d03b3b;
+  --sev-high: #ec835a;
+  --sev-medium: #fab219;
+  --sev-low: #898781;
+  --sev-info: #c3c2b7;
+}
+.dark {
+  --sev-critical: #d03b3b;
+  --sev-high: #ec835a;
+  --sev-medium: #fab219;
+  --sev-low: #898781;
+  --sev-info: #52514e;
+}
+
+/* Print / Save as PDF: only the passport article, on white. */
+@media print {
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+  .passport {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  .passport-section {
+    break-inside: avoid-page;
   }
 }

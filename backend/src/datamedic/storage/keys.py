@@ -17,3 +17,13 @@ def dataset_prefix(area: str, owner_id: uuid.UUID, dataset_id: uuid.UUID) -> str
     if area not in AREAS:
         raise ValueError(f"unknown storage area {area!r}")
     return f"{area}/{owner_id}/{dataset_id}/"
+
+
+def version_object_key(owner_id: uuid.UUID, dataset_id: uuid.UUID, version_id: uuid.UUID) -> str:
+    return f"versions/{owner_id}/{dataset_id}/{version_id}.parquet"
+
+
+def artifact_object_key(
+    owner_id: uuid.UUID, dataset_id: uuid.UUID, artifact_id: uuid.UUID, ext: str
+) -> str:
+    return f"artifacts/{owner_id}/{dataset_id}/{artifact_id}.{ext}"

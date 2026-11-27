@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from datamedic.config import Settings
 from datamedic.datasets.file_validation import extension_of
-from datamedic.db.models import Dataset, Job, OriginalFile
+from datamedic.db.models import Dataset, DatasetVersion, Job, OriginalFile
 from datamedic.errors import (
     Conflict,
     NotFound,
@@ -109,14 +109,43 @@ def register_upload(db: Session, settings: Settings, ds: Dataset, stored: Stored
     return job
 
 
-def list_datasets(db: Session, owner_id: uuid.UUID) -> list[tuple[Dataset, str | None]]:
+def head_version(db: Session, ds: Dataset) -> DatasetVersion | None:
+    if ds.head_version_id is None:
+        return None
+    return db.scalar(
+        select(DatasetVersion).where(
+            DatasetVersion.id == ds.head_version_id, DatasetVersion.owner_id == ds.owner_id
+        )
+    )
+
+
+def list_datasets(
+    db: Session, owner_id: uuid.UUID
+) -> list[tuple[Dataset, str | None, DatasetVersion | None]]:
     rows = db.execute(
-        select(Dataset, OriginalFile.detected_format)
+        select(Dataset, OriginalFile.detected_format, DatasetVersion)
         .outerjoin(OriginalFile, OriginalFile.dataset_id == Dataset.id)
+        .outerjoin(DatasetVersion, DatasetVersion.id == Dataset.head_version_id)
         .where(Dataset.owner_id == owner_id, Dataset.deleted_at.is_(None))
         .order_by(Dataset.created_at.desc())
     ).all()
-    return [(ds, fmt) for ds, fmt in rows]
+    return [(ds, fmt, head) for ds, fmt, head in rows]
+
+
+def queue_parse(
+    db: Session, settings: Settings, owner_id: uuid.UUID, dataset_id: uuid.UUID
+) -> tuple[Dataset, Job]:
+    """Queue parsing again for a stored upload that has no version yet: a dataset validated
+    before parsing existed, or one whose parse failed (e.g. after a worker crash)."""
+    ds = get_owned(db, owner_id, dataset_id, for_update=True)
+    if ds.status not in ("validated", "parse_failed") or ds.head_version_id is not None:
+        raise Conflict("Parsing can only be queued for an uploaded dataset without a version.")
+    ensure_job_capacity(db, settings, owner_id)
+    ds.status = "validating"
+    ds.updated_at = datetime.now(UTC)
+    job = create_job(db, settings, owner_id, "ingest", ds.id)
+    db.commit()
+    return ds, job
 
 
 def soft_delete(db: Session, settings: Settings, owner_id: uuid.UUID, dataset_id: uuid.UUID) -> Job:

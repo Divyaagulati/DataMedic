@@ -32,6 +32,11 @@ def create_celery(settings: Settings) -> Celery:
                 "schedule": 60.0,
                 "options": {"queue": "maintenance"},
             },
+            "reconcile-orphan-objects": {
+                "task": "datamedic.maintenance.reconcile_orphans",
+                "schedule": 3600.0,
+                "options": {"queue": "maintenance"},
+            },
             "reap-stale-jobs": {
                 "task": "datamedic.maintenance.reap_stale",
                 "schedule": 60.0,

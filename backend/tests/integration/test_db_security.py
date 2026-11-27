@@ -27,7 +27,14 @@ def two_users_with_data(make_client: ClientFactory, ctx: AppContext):  # type: i
 
 def test_rls_fails_closed_without_user(ctx: AppContext, two_users_with_data) -> None:  # type: ignore[no-untyped-def]
     with session_scope(ctx.sessions) as db:  # no bind_user
-        for table in ("datasets", "original_files", "jobs"):
+        for table in (
+            "datasets",
+            "original_files",
+            "jobs",
+            "dataset_versions",
+            "artifacts",
+            "version_profiles",
+        ):
             assert db.execute(text(f"SELECT count(*) FROM {table}")).scalar_one() == 0  # noqa: S608
 
 

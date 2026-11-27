@@ -1,7 +1,7 @@
 [project]
 name = "datamedic-backend"
 version = "0.1.0"
-description = "DataMedic backend: API, background workers and (later) the analysis engine"
+description = "DataMedic backend: API, background workers and the analysis engine"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -15,6 +15,17 @@ dependencies = [
     "pydantic-settings==2.16.2",
     "argon2-cffi==25.1.0",
     "email-validator==2.3.0",
+    # Data engine (worker only; the API never imports these)
+    "pandas==2.3.3",
+    "numpy==2.5.4",
+    "pyarrow==26.0.1",
+    "openpyxl==3.1.5",
+    "defusedxml==0.7.1",  # openpyxl uses it automatically against XML bombs
+    "xlrd==2.0.2",
+    "scipy==1.18.1",  # statistical tests in diagnostics
+    "scikit-learn==1.9.1",  # IsolationForest (OutlierDetector port)
+    "imbalanced-learn==0.14.2",
+    "threadpoolctl==3.8.0",  # Experiment Lab: one native thread per worker (already a scikit-learn dependency)
 ]
 
 [dependency-groups]
@@ -23,6 +34,7 @@ dev = [
     "httpx2==2.16.0",
     "ruff==0.17.4",
     "mypy==2.4.1",
+    "hypothesis==6.170.15",  # property tests (MPL-2.0, dev only)
 ]
 
 [build-system]
@@ -60,7 +72,11 @@ packages = ["datamedic"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*", "kombu.*"]
+module = [
+    "celery", "celery.*", "kombu.*", "pandas", "pandas.*", "pyarrow", "pyarrow.*",
+    "scipy", "scipy.*", "sklearn", "sklearn.*", "imblearn", "imblearn.*", "threadpoolctl",
+    "defusedxml", "defusedxml.*",
+]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

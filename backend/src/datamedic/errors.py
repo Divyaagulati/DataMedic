@@ -44,6 +44,7 @@ AuthInvalid = _err("AuthInvalid", 401, "AUTH_INVALID", "Invalid credentials or t
 CsrfFailed = _err("CsrfFailed", 403, "CSRF_FAILED", "CSRF validation failed")
 Forbidden = _err("Forbidden", 403, "FORBIDDEN", "Action not allowed")
 NotFound = _err("NotFound", 404, "NOT_FOUND", "Resource not found")
+AnalyticsBusy = _err("AnalyticsBusy", 429, "ANALYTICS_BUSY", "Analytics is busy")
 Conflict = _err("Conflict", 409, "CONFLICT", "Conflicting state")
 QuotaExceeded = _err("QuotaExceeded", 409, "QUOTA_EXCEEDED", "Quota exceeded")
 DatasetNotReady = _err("DatasetNotReady", 409, "DATASET_NOT_READY", "Dataset is not ready")
@@ -53,12 +54,18 @@ UnsupportedFormat = _err("UnsupportedFormat", 415, "UNSUPPORTED_FORMAT", "Unsupp
 ValidationFailed = _err("ValidationFailed", 422, "VALIDATION_FAILED", "Validation failed")
 RateLimited = _err("RateLimited", 429, "RATE_LIMITED", "Too many attempts")
 JobLimitExceeded = _err("JobLimitExceeded", 429, "JOB_LIMIT_EXCEEDED", "Too many active jobs")
+ApprovalRequired = _err("ApprovalRequired", 409, "APPROVAL_REQUIRED", "Approval required")
+ApprovalStale = _err("ApprovalStale", 409, "APPROVAL_STALE", "Approval is out of date")
+EvaluationBlocked = _err(
+    "EvaluationBlocked", 409, "EVALUATION_BLOCKED", "Leakage-controlled evaluation is not possible"
+)
 
 # Error codes recorded on failed jobs (not raised over HTTP).
 FORMAT_MISMATCH = "FORMAT_MISMATCH"
 MALICIOUS_FILE = "MALICIOUS_FILE"
 UNSUPPORTED_FORMAT = "UNSUPPORTED_FORMAT"
 INTEGRITY_FAILED = "INTEGRITY_FAILED"
+LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
 JOB_CANCELLED = "JOB_CANCELLED"
 JOB_STALE = "JOB_STALE"
 INTERNAL = "INTERNAL"

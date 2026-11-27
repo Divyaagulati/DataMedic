@@ -61,7 +61,7 @@ Practitioners spend most of an ML project on data preparation, and most ML relia
 - **G6 Biomedical-grade first domain** (clinical tabular).
 
 ### Non-goals (all tiers unless moved by a later decision)
-Hyper-parameter tuning or AutoML; model deployment and serving; streaming data; image, signal, free-text NLP and raw sequencing data; regulatory certification; automatic application of any transformation to stored data without review.
+Open-ended AutoML (search over model families and pipelines, Bayesian optimisation, ensembling, stacking); model deployment, serving and trained-model download; streaming data; image, signal, free-text NLP and raw sequencing data; regulatory certification; automatic application of any transformation to stored data without review.
 
 ## 5. Core requirements and how they are satisfied
 
@@ -97,7 +97,7 @@ Each requirement is tagged with its tier: **[MVP]**, **[V2]** or **[Future]**.
 - FR-2.4 [MVP] Nested JSON is flattened with a declared column-naming scheme. Nesting beyond a limit is rejected.
 - FR-2.5 [MVP] Content type is validated by magic bytes. Macro-enabled formats and files over the decompression, cell or column limits are rejected.
 - FR-2.6 [MVP] The original is stored byte-for-byte. The parsed table becomes **version 0** (canonical Parquet) with a hidden stable row identifier `_dm_row_id` assigned in file order.
-- FR-2.7 [MVP] A preview of the first 100 rows is shown to the owner only.
+- FR-2.7 [MVP] A preview of the first 20 rows is shown to the owner only (reduced from 100 by owner decision in Phase 2).
 - FR-2.8 [MVP] A PHI/PII scan runs at ingest, and its findings are shown before any other action.
 - FR-2.9 [MVP] Uploads count against the user's storage quota (§6.13).
 
@@ -110,7 +110,11 @@ Each requirement is tagged with its tier: **[MVP]**, **[V2]** or **[Future]**.
 ### 6.4 Diagnostics
 - FR-4.1 [MVP] Universal diagnostic suite ([ML_ENGINE_DESIGN.md §2.1](ML_ENGINE_DESIGN.md)).
 - FR-4.2 [MVP] Biomedical clinical suite, listed and labelled separately.
-- FR-4.3 [MVP] Every finding has `check_id`, `check_version`, `status` (`passed | warning | failed | not_run | error`), `severity` (`info | low | medium | high | critical`), structured `evidence`, `limitations`, affected columns, an optional affected-row reference (row IDs) and sampling metadata.
+- FR-4.3 [MVP] Every finding has `check_id`, `check_version`, `status`, `severity`, a title, an explanation, structured `evidence`, affected columns, the number and percentage of affected rows (when applicable), a suggested action, `limitations` and sampling metadata. Owner decision, Phase 3 (2026-11-09):
+  - `status` is `detected | not_detected | not_assessed | error`, replacing `passed | warning | failed | not_run | error`.
+  - `severity` is `critical | high | medium | low | info`, where `info` is shown as "Informational".
+  - Row references are evidence examples for now; a row-reference artifact comes later.
+- FR-4.4a [MVP, owner decision Phase 3] Domain modules for **financial**, **business** and **industrial** data are in the MVP alongside biomedical. They were moved from Future Enhancements by the owner on 2026-11-09. Domain checks run only for the dataset's selected domain, and report `not_assessed` when their required roles are not declared.
 - FR-4.4 [MVP] `not_run` findings state the unmet requirement.
 - FR-4.5 [MVP] The health summary shows counts by status, severity and domain. There is no unexplained single score.
 - FR-4.6 [MVP] Analysis runs are tied to a version and a **semantics hash** (domain + roles + task type + domain reference data such as biomedical reference ranges). A run whose hash differs from the current one is shown as stale.
@@ -146,10 +150,13 @@ Each requirement is tagged with its tier: **[MVP]**, **[V2]** or **[Future]**.
 - FR-7.6 [MVP] The server and the worker both verify approvals. No API path commits a high-risk step without a valid approval.
 
 ### 6.8 Model evaluation (separate from data cleaning)
-- FR-8.1 [MVP] Baseline models: dummy, logistic or ridge, histogram gradient boosting and XGBoost. [V2] Random forest.
+- FR-8.1 [MVP] Baseline models: dummy, logistic or ridge, random forest and histogram gradient boosting (owner decision P1, Phase 5). XGBoost stays deferred (owner decision P2; not installed).
+- FR-8.1a [MVP, owner decision P1] Bounded hyper-parameter selection: nested cross-validation over fixed grids of at most four settings per model, inner folds built from outer training rows only, with a recorded fallback to default settings for small cohorts or above the fit budget.
 - FR-8.2 [MVP] Split strategy is chosen from roles (group, time or stratified). The user may override it, with warnings.
 - FR-8.3 [MVP] Metrics are reported as mean ± sd across folds, with per-fold paired differences between candidates. Suspiciously high scores are flagged.
-- FR-8.4 [V2] Locked holdout with an access log, bootstrap confidence intervals, calibration plots.
+- FR-8.4 [MVP, owner decision P1] Calibration assessment (reliability curve, ECE, Brier score) and group-aware bootstrap intervals on pooled out-of-fold predictions (unavailable for time-ordered splits). [V2] Locked holdout with an access log.
+- FR-8.6 [MVP, owner decision P3] A version fitted on all of its rows receives a leakage-controlled evaluation only by replaying its committed steps inside each training fold from its eligible ancestor, after proving the replay faithful; otherwise leakage-controlled evaluation is blocked, and an explicit, permanently labelled exploratory run is the only alternative.
+- FR-8.7 [MVP] ML Reliability Auditor (20 checks; confirmed, configuration and statistical findings; `not_assessed` when metadata is missing; a rule-based evaluation status, never a numeric score) and explainability (held-out permutation importance, coefficients, tree importances, error slices).
 - FR-8.5 [MVP] Evaluation never writes versions.
 
 ### 6.9 Leakage audit
@@ -270,7 +277,7 @@ Exceeding a limit returns `QUOTA_EXCEEDED` (storage, datasets, versions), `LIMIT
 ### Version 2 (after MVP works)
 - YData Profiling (fg-data-profiling) report, PyOD ensembles, Evidently drift, all through existing adapters.
 - Forks and branches with a version graph, and deletion of individual versions.
-- Locked holdout, bootstrap confidence intervals, calibration plots, random forest baseline.
+- Locked holdout. (Bootstrap intervals, calibration assessment and random forest moved into the MVP by owner decision P1, Phase 5.)
 - Opt-in aggregate-only LLM explanations through the egress gateway.
 - TOTP MFA, PDF passports, SSE progress.
 - Direct-to-storage uploads for files over 200 MB, a hardened export sandbox container, per-patient aggregation ops.
@@ -278,8 +285,8 @@ Exceeding a limit returns `QUOTA_EXCEEDED` (storage, datasets, versions), `LIMIT
 
 ### Future Enhancements
 - Teams, sharing and SSO; a public API.
-- Financial, business and industrial domain modules.
-- Data connectors, an on-prem distribution (requires a licence re-review), plugin discovery via entry points, hyper-parameter tuning.
+- ~~Financial, business and industrial domain modules.~~ Moved into the MVP (owner decision, 2026-11-09; FR-4.4a). Their deeper features (e.g. look-ahead bias detection, funnel consistency, maintenance-event leakage) remain future work.
+- Data connectors, an on-prem distribution (requires a licence re-review), plugin discovery via entry points, open-ended hyper-parameter search (bounded selection is in the MVP, FR-8.1a), XGBoost, SHAP.
 
 ## 11. Open questions
 

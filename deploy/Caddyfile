@@ -1,0 +1,36 @@
+# DataMedic reverse proxy: automatic HTTPS (Let's Encrypt), same-origin routing.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DATAMEDIC_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 60MB
+	}
+	# API and health endpoints -> FastAPI; everything else -> Next.js.
+	@api path /api/* /healthz /readyz
+	handle @api {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+	# Security headers. "?" sets a default only when the upstream did not send the header.
+	# script-src needs 'unsafe-inline' for Next.js bootstrap scripts (nonce-based CSP deferred);
+	# the app renders no raw HTML (no dangerouslySetInnerHTML) and talks only to this origin.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		?Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "no-referrer"
+		?X-Frame-Options "DENY"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+		-X-Powered-By
+	}
+	log {
+		output stdout
+		format console
+	}
+}

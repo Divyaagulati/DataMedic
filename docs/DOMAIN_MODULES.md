@@ -119,7 +119,30 @@ The patient-grouped split is not an op. It follows from `bio.patient_id` implyin
 - **ComBat safety**: `scanpy.pp.combat(adata, key=…, covariates=[…])` fits across all provided samples. In experiments it is therefore **transductive**: the candidate is labelled "optimistic" with a `TRANSDUCTIVE_STEP` limitation and is never presented as leakage-free. ComBat is high-risk and destructive, is recommended only with the condition or target as a covariate, and is blocked when confounding is critical and no covariate is set.
 - Per-patient aggregation (`bio.patients.aggregate_*`) needs new row-ID derivation rules and is deferred to V2.
 
+## 4.8 Implemented in Phase 3 (2026-11-09)
+
+Packages live in `datamedic/domains/<key>/`. Each has `__init__.py` (roles and check specs, standard library only) and `checks.py` (implementations). They are registered in `domains/bootstrap.py`, the only place that lists modules, and core packages never import them. A stub module registers without core changes (`tests/unit/test_check_framework.py`).
+
+| Module | Roles | Checks |
+|---|---|---|
+| Biomedical | `bio.patient_id`, `bio.sample_id`, `bio.batch`, `bio.condition`, `bio.biomarker_id`, `bio.sex`, `bio.age`, `bio.heart_rate`, `bio.systolic_bp`, `bio.diastolic_bp`, `bio.temperature_c`, `bio.bmi` | `bio.patients.repeated_rows`, `bio.leakage.patient_level`, `bio.biomarkers.id_consistency`, `bio.dimensionality.hdlss`, `bio.batch.effect` (Kruskal–Wallis + BH FDR + ε²), `bio.batch.confounding` (Cramér's V / ε²), `bio.clinical.plausibility` |
+| Financial | `fin.transaction_id`, `fin.account_id`, `fin.timestamp`, `fin.amount` | `fin.timestamps.consistency`, `fin.transactions.duplicates`, `fin.leakage.temporal` (target change across 5 time periods), `fin.amounts.unusual` |
+| Business | `biz.customer_id`, `biz.segment` | `biz.customers.duplicates`, `biz.customers.suspicious_ids`, `biz.leakage.churn` (missingness pattern matches the outcome), `biz.segments.imbalance` |
+| Industrial | `ind.timestamp`, `ind.asset_id`, `ind.sensor`, `ind.sensor_nonneg`, `ind.sensor_percent` | `ind.sensors.impossible` (declared physical limits, saturation), `ind.sampling.irregular`, `ind.sensors.shift` (KS early vs late + BH), `ind.sensors.drift` (Spearman with time + BH) |
+
+Deviation from §4.3: `bio.clinical.plausibility` uses wide, fixed physiological bounds for explicitly declared vital-sign roles (units assumed and stated). A user-supplied reference-range table (`bio.labs.plausibility`) is not built yet.
+
+Also not built yet:
+- `bio.patients.inconsistent_static`, `bio.batch.design_balance` (partly covered: confounding also compares the batch with `bio.condition`);
+- `bio.labs.unit_inconsistency`, `bio.temporal.post_outcome_features`;
+- `bio.privacy.phi_extended`, `bio.cohort.subgroup_balance`;
+- all ops, rules and split policies.
+
+Time-based checks always sort by the declared time role, never by row order.
+
 ## 5. Future modules (interface proof only)
+
+The financial, business and industrial modules in this section were built in Phase 3 (§4.8) with a first set of checks. The remaining ideas below are future work.
 
 | Module | Roles | Example checks | Split policy |
 |---|---|---|---|

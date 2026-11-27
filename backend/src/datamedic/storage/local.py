@@ -112,6 +112,22 @@ class LocalFilesystemStorage:
             p.relative_to(self._objects).as_posix() for p in base.rglob("*") if p.is_file()
         )
 
+    def modified_at(self, key: str) -> float:
+        try:
+            return self._path(key).stat().st_mtime
+        except FileNotFoundError as exc:
+            raise ObjectNotFound(key) from exc
+
+    def delete(self, key: str) -> bool:
+        if key.startswith("raw/"):
+            raise InvalidObjectKey("originals are never deleted individually")
+        path = self._path(key)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        return True
+
     def delete_prefix(self, prefix: str) -> int:
         base = self._prefix_path(prefix)
         if not base.exists():

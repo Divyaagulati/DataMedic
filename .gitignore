@@ -29,3 +29,46 @@ next-env.d.ts
 Thumbs.db
 .vscode/
 .idea/
+!deploy/.env.production.example
+backups/
+
+# Data, uploads and artifacts (never committed; synthetic test fixtures are allowed below)
+/*.csv
+/*.tsv
+/*.xls
+/*.xlsx
+/*.parquet
+/*.json.gz
+/data/
+/uploads/
+/storage/
+*.parquet
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz
+*.pkl
+*.pickle
+*.joblib
+!backend/tests/fixtures/**
+
+# Keys and credentials
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.env.production
+.env.local
+
+# Logs, temporary files, coverage
+*.log
+logs/
+tmp/
+*.tmp
+.coverage
+coverage/
+htmlcov/
+.hypothesis/

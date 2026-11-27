@@ -149,6 +149,14 @@ class LabelNoiseDetector(Protocol): ... # Cleanlab (MVP)
 
 The engine lives in `datamedic.engine` inside the single backend distribution (Phase 1 decision, simpler than separate packages); its purity (no FastAPI, SQLAlchemy, Celery or boto3 imports) is enforced by an import-boundary test added with the first engine code. Third-party APIs are called only inside adapters, ops and concrete checks. Each adapter has a contract test pinned to the locked library version.
 
+**Phase 5 modules (2026-11-25).** `datamedic/training/` (router, schemas, service in the API; `jobs.py`
+with the worker handlers `train` and `reliability_audit`, queue `evaluate`, 3,600 s and 1,200 s) and the
+engine package `engine/ml/` (pure; `spec`, `eligibility`, `audit_spec` are standard library and imported by
+the API). Training reuses the frozen split definitions, `PreprocessExecutor`, the Lab's model helpers and
+metrics, lineage (`transformation_runs.spec_snapshot`), the findings schema and the job runner. Frontend
+routes: `/datasets/[datasetId]/models` and `/datasets/[datasetId]/models/[runId]`. No trained model is
+persisted (no safe serialiser for these estimators without pickle); results are reproduced by rerun.
+
 ## 6. Frontend
 
 ### 6.1 Routes
@@ -231,7 +239,10 @@ The dataset `status` is a lifecycle state of the dataset, not a job status. Job 
    - Any mismatch with the extension is rejected (`FORMAT_MISMATCH`).
 2. **XLSX hardening**: inspect ZIP entries before extraction (entry count, total uncompressed size, compression ratio), and reject `vbaProject.bin` and external links. Parse with `defusedxml` installed, per openpyxl's documented guidance against XML bombs, in read-only mode.
 3. **XLS** via `xlrd` 2.x.
-4. **Parsing in a subprocess** with `resource.setrlimit` memory and CPU limits (Linux) and a wall-clock timeout.
+4. **Parsing in a subprocess** with `resource.setrlimit` memory and CPU limits (Linux) and a wall-clock timeout. Implemented in Phase 2 as `datamedic.workers.parse_sandbox`:
+   - The worker copies the original to a private temp directory and runs `python -I -m datamedic.workers.parse_sandbox` with a minimal environment: no `DATAMEDIC_*` secrets, `ARROW_DEFAULT_MEMORY_POOL=system`, and single-threaded OpenBLAS/OMP/MKL (OpenBLAS otherwise aborts at import under a memory limit).
+   - The limits are RLIMIT_AS (`parse_memory_limit_mb`, 4096), RLIMIT_CPU and wall clock (`parse_timeout_seconds`, 480), RLIMIT_FSIZE, and no core dumps. Windows gets only the timeout; `parse_report.resource_limits_enforced` records which applied.
+   - The child's stdout and stderr are discarded, because parser tracebacks can contain cell values. A crash becomes `PARSE_FAILED`; a killed child or memory exhaustion becomes `LIMIT_EXCEEDED`.
 5. Parse with the detected or overridden options. Raw strings are read where the format allows, and type inference is a separate recorded step.
 6. Enforce cell (20M) and column (2,000) limits → `LIMIT_EXCEEDED`.
 7. **Canonicalise**:
@@ -239,8 +250,19 @@ The dataset `status` is a lifecycle state of the dataset, not a job status. Job 
    - Add `_dm_row_id` (int64, 0…n-1 in source order).
    - Write Parquet (pyarrow).
 8. **Hashes**: `file_sha256` of the Parquet bytes (integrity) and `content_hash` (semantic, §9.3).
-9. Run the **privacy scan** (an analysis run of kind `privacy_scan`). Write the preview artifact (first 100 rows, `_dm_row_id` hidden).
-10. Create v0 (`kind=ingest`), set `head_version_id`, set the dataset to `ready`, and chain the default analysis job.
+9. Run the **privacy scan** (an analysis run of kind `privacy_scan`; not yet implemented). Write the preview artifact (first 20 rows, `_dm_row_id` hidden).
+10. Create v0 (`kind=ingest`), set `head_version_id`, set the dataset to `ready`, and chain the default analysis job. In Phase 2 the chained job is `profile` (queue `analysis`): `BuiltinProfiler` behind the `Profiler` port, with results in `version_profiles`. It is published only after the ingest transaction commits (`JobOutcome.follow_ups`).
+
+Ingest outcomes: `ready`; `parse_failed` (`PARSE_FAILED`: malformed or empty content, or a worker crash via the ingest failure hook); `rejected` (`FORMAT_MISMATCH`, `MALICIOUS_FILE`, `LIMIT_EXCEEDED`, `INTEGRITY_FAILED`).
+
+Type inference rules (engine `table.py`), all recorded in the version schema:
+- A fixed missing-token list (`""`, `NA`, `N/A`, `n/a`, `NaN`, `nan`, `NULL`, `null`, `#N/A`, `<NA>`; not `None`, `-` or sentinels).
+- Numbers with leading zeros or 16+ digits stay text.
+- Only ISO-8601 dates are parsed; zoned dates are converted to UTC, and zoned mixed with naive stays text.
+- `true/false/yes/no` become boolean. Single letters (`t/f`, `y/n`) become boolean only when both letters of one pair occur, so a column of only `F` (e.g. sex) stays categorical.
+- Strings are classed as categorical (≤ 50 distinct values), text, or identifier (all-unique over ≥ 20 rows, average length ≤ 40). Integers are identifier-like only when all-unique over ≥ 20 rows **and** packed into a dense range (span ≤ 2 × rows). Distinct but spread-out integers, such as incomes, stay numeric.
+- Parquet keeps its declared types, including its timestamp unit. JSON values are kept as objects until inference, so integers with nulls stay integers. Two JSON keys that flatten to the same name (`"a.b"` and `{"a": {"b"}}`) fail the parse rather than dropping a value.
+- Row 1 is always the header. If most header cells are numbers, `parse_report.header_looks_like_data` is set and the overview says so. Header options arrive with re-parse.
 
 ## 8. Analysis lifecycle
 
@@ -292,7 +314,7 @@ It ignores Parquet writer metadata. Export validation compares content hashes fi
 Code generation and export validation use this chain, so `pipeline.py` always starts from the original file.
 
 ### 9.5 Fitted state
-Fitted objects are persisted with `joblib` **only for platform-created objects**, with an HMAC verified before load. They are never accepted from users. Code generation never ships pickles; it refits deterministically.
+**Phase 4 decision D4 (2026-11-17): no pickle or joblib for persisted user pipeline artifacts.** Learned parameters are stored as JSON in step reports, owner-scoped under RLS and redacted for `sensitive` columns in reports, logs and API responses. Code generation and replays refit deterministically from the data; fitted objects exist only in worker memory.
 
 ## 10. Job orchestration
 
@@ -309,7 +331,7 @@ Fitted objects are persisted with `joblib` **only for platform-created objects**
 - **Progress**: tasks update `jobs.progress` (phase, pct), and the client polls `GET /jobs/{id}`.
 - **Cancellation**: `cancel_requested` is checked between checks, folds and steps.
 - **Reaper**: marks `running` jobs with a heartbeat older than their hard limit plus grace as `failed(JOB_STALE)`.
-- **Chaining**: ingest → analysis → recommendations. Commit or revert → analysis on the new version.
+- **Chaining**: ingest → analysis → recommendations. Commit or revert → analysis on the new version. (Phase 3: ingest → profile + analysis (diagnostics), both on queue `analysis`. Compose runs `worker-ingest` for `ingest` and `worker` for `analysis,maintenance`, each with concurrency 1 and memory caps; see README "Resource limits".)
 
 ## 11. Dependency choices
 
@@ -335,12 +357,14 @@ Verified against PyPI metadata and official docs on 2026-11-06. Exact pins come 
 | xlrd 2.x | XLS | BSD | `.xls` only |
 | SciPy | Statistical tests, version comparison | BSD-3 | |
 | scikit-learn 1.9.x ⚠ | Pipelines, splitters, models, IsolationForest, metrics | BSD-3 | Python `>=3.11` |
-| Feature-engine 1.9.x ⚠ | Preprocessing ops | BSD-3 | Requires pandas `>=2.2`, scikit-learn `>=1.4`; pulls statsmodels |
+| ~~Feature-engine 1.9.x~~ | Not used (Phase 4 decision D2): preprocessing ops use scikit-learn plus in-house transformers | BSD-3 | Revisit only if a capability cannot be implemented reliably with the existing stack |
+| imbalanced-learn 0.14.2 | SMOTE and random over/undersampling (added in Phase 4 Part C; `tests/unit/test_imblearn_contract.py`) | MIT | Declares scikit-learn `>=1.4.2,<2`, NumPy `<3`, SciPy `<2`; pulls `sklearn-compat` 0.1.6 (scikit-learn `<1.10`). Imported only inside resampling functions |
 | statsmodels | VIF | BSD-3 | |
 | XGBoost 3.4.x ⚠ | Baseline model | Apache-2.0 | Linux wheel pulls `nvidia-nccl-cu13` (image size) |
 | Cleanlab 2.9.x ⚠ | Label-noise check | Apache-2.0 (current) | Earlier releases were AGPL-3.0. Confirm the license file in the pinned release. |
 | Jinja2 | Passport HTML + code templates | BSD-3 | Autoescape on for HTML |
-| pytest, Hypothesis | Tests | MIT / MPL-2.0 | Dev only |
+| threadpoolctl 3.8.0 | Experiment Lab: one native thread per worker process (already a scikit-learn dependency; declared directly in Part D) | BSD-3 | — |
+| pytest, Hypothesis 6.170.x | Tests | MIT / MPL-2.0 | Dev only; Hypothesis added in Phase 4 Part A for op property tests |
 
 ### 11.3 Python libraries — V2 (deferred, behind ports)
 | Library | Port | Notes |
@@ -411,7 +435,7 @@ Verified against PyPI metadata and official docs on 2026-11-06. Exact pins come 
 
 ## 15. Observability
 
-Structured JSON logs carry `request_id`, `job_id`, `user_id` (UUID) and error codes. A log scrubber denies keys such as `value(s)`, `row(s)`, `sample` and `cell`, and tests assert that no dataset values are logged. MVP metrics are request latency and error rate, queue depth, job durations, check error rate and storage usage. OpenTelemetry tracing is V2.
+Structured JSON logs carry `request_id`, `job_id`, `user_id` (UUID) and error codes. A log scrubber denies keys such as `value(s)`, `row(s)`, `sample` and `cell`, and tests assert that no dataset values are logged. Exceptions are logged by type only, never with message or traceback, because data-library messages can quote cell values. The Celery worker keeps this configuration through a `setup_logging` signal receiver in `workers/tasks.py`; without it, Celery replaces the root handlers at start-up (`tests/unit/test_worker_logging.py`). The parse sandbox's own output is discarded. MVP metrics are request latency and error rate, queue depth, job durations, check error rate and storage usage. OpenTelemetry tracing is V2.
 
 ## 16. Deployment
 
@@ -438,3 +462,79 @@ Structured JSON logs carry `request_id`, `job_id`, `user_id` (UUID) and error co
 | One worker image | Queue routing | V2 `worker-bio` image for Scanpy |
 | No LLM | — | V2 opt-in egress gateway (PRIVACY_AND_SECURITY §3) |
 | In-code domain registry | `DomainModule` interface | Future entry-point discovery |
+
+## 18. Analytics Studio (Phase 8, implemented 2026-11-27)
+
+Modules: `engine/analytics/query.py` (structured query engine, pure pandas/NumPy),
+`engine/analytics/insights.py` (automated insights, worker), `analytics/` (API service, router,
+natural-language parser `nl.py`, data access `data.py`, insights job), frontend
+`app/datasets/[datasetId]/analytics/` and `components/analytics/` (Recharts 3.11.1).
+
+**Decision A1 — engine.** pandas (already pinned) rather than DuckDB. Versions are capped at
+200,000 rows / 5,000,000 cells, so in-memory pandas answers interactive queries in well under a
+second; DuckDB would add a native dependency, a second SQL dialect to secure and a new Docker
+compatibility surface without a measurable benefit at this size. Queries are *structured
+specifications*, never SQL, so there is nothing to inject into: column names are dictionary keys
+and values are compared as typed literals.
+
+**Decision A2 — where queries run.** Interactive queries run in the API process (lazy pandas
+import, `analytics/data.py`) so the studio does not queue behind training jobs. Bounds: version
+size limits above, an LRU cache of at most `analytics_cache_entries` (2) hash-verified frames,
+at most `analytics_max_concurrency` (2) concurrent queries (otherwise 429 `ANALYTICS_BUSY`), and
+per-query limits (20 filters, 2 groupings, 6 measures, 200 `in` values, 1,000 groups, 500 result
+rows, 60 bins, 2,000 scatter points, 20 matrix columns). pandas operations cannot be interrupted;
+time is bounded through these input limits. Whole-dataset automated insights run in the worker
+(`insights` job) and are stored (`analysis_runs` kind `insights`).
+
+**Query specification.** `kind` ∈ aggregate, histogram, box, scatter, correlation, missingness;
+`filters[] = {column, op, value|values|min|max}` with op ∈ eq, ne, gt, gte, lt, lte, between, in,
+not_in, is_missing, not_missing, date_between; `group_by[] = {column, date_part?: day|week|month|
+quarter|year, bins?: 2–60}`; `measures[] = {agg, column?, q?}` with agg ∈ count, count_distinct,
+sum, mean, median, min, max, std, var, quantile, pct_total; `sort = {by: group|measure, index,
+dir}`; `limit`; `margins` (pivot totals); histogram `bins` or shared `edges`; scatter `color`,
+`size`; correlation `method` (pearson|spearman). Type rules: numeric aggregations need numeric
+columns; ranges need numeric or date columns; numeric columns with > 50 distinct values must be
+binned to group; dates must use a date part. Invalid specifications are rejected with pointers;
+nothing is coerced.
+
+**Null semantics.** Comparison filters never match missing values (use is_missing/not_missing);
+grouping keeps an explicit "(missing)" group; aggregations ignore missing values; `count` without
+a column counts rows, with a column counts non-missing values; every group reports its row count;
+`pct_total` is the share of the measure's total over the filtered rows.
+
+**Privacy.** Protected columns (sensitive on any version, or derived from one) can only be
+counted or tested for missingness. *Privacy mode* (biomedical domain or any protected column):
+groups, cells, histogram bins and box groups with fewer than 10 rows are suppressed; when exactly
+one group would be suppressed, the next smallest is suppressed too (secondary suppression); a
+filtered cohort under 10 rows suppresses the whole result; scatter plots return binned counts,
+never points. Residual risk: differencing across many overlapping filtered queries can still
+narrow small groups; no differential privacy or anonymisation is claimed.
+
+**Dashboards.** `dashboards` / `dashboard_widgets` (migration 0009) store validated widget
+specifications (`{query, display}`) and dashboard filters, never data. A dashboard is bound to one
+version; switching is explicit (`switch-version` with `confirm: true`) and refused unless every
+widget and filter validates on the target; otherwise duplicate onto the target, which skips and
+names incompatible widgets.
+
+**Insights methods.** Skewness with SE √(6/n); missingness shares and missingness–target
+association (χ² / Mann–Whitney); Tukey far-out fences; Pearson and Spearman with Fisher-z CI;
+nonlinearity flag (|ρ| − |r| ≥ 0.15); Kruskal–Wallis ε² group differences; concentration (top
+share, HHI); temporal Kendall-τ trend and a single change in mean with a 500-permutation test;
+target associations reuse Biomedical Intelligence Lite statistics; domain modules (biomedical
+summary, financial concentration and robust outliers, industrial abnormal readings, business
+customer concentration). Benjamini–Hochberg within each family; entity-level units when an entity
+role exists; deterministic 50,000-row sample above that size (disclosed).
+
+**Natural language.** `analytics/nl.py` is deterministic (regular expressions plus local fuzzy
+column resolution with difflib). Intents: grouped aggregates, top group, KPI, histogram /
+distribution, relationship, strongest correlations, most missing, time trends, before/after
+comparison; ambiguous references return options, unknown or unsupported questions an
+explanation; other questions fall back to the report-level Copilot. Numbers always come from
+the engine.
+
+**Hugging Face / model integration (P7): deferred, by decision.** A sentence-embedding intent
+matcher (e.g. sentence-transformers with a small MiniLM model) would add PyTorch (~0.7–1 GB image,
+~300–500 MB RAM per process) to fit an already working deterministic parser, with no evaluation
+set to show a measurable gain; TAPAS-style table QA would compute answers inside the model,
+which conflicts with the rule that numbers come only from the engine. Revisit with a labelled
+question set if needed; any model must stay optional, local, pinned and validated.

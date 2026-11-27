@@ -36,13 +36,15 @@ def test_upload_requires_verified_email(make_client: ClientFactory, ctx: AppCont
     assert r.status_code == 403 and r.json()["code"] == "FORBIDDEN"
 
 
-def test_csv_upload_is_stored_and_validated(make_client: ClientFactory, ctx: AppContext) -> None:
+def test_csv_upload_is_stored_and_parsed(make_client: ClientFactory, ctx: AppContext) -> None:
     user = signup_and_login(make_client(), ctx)
     body = create_and_upload(user)
     ds_id = body["dataset"]["id"]  # type: ignore[index]
-    # Eager job execution in tests: the ingest job already ran.
+    # Eager job execution in tests: the ingest job (and the chained profile job) already ran.
     ds = user.client.get(f"/api/v1/datasets/{ds_id}").json()
-    assert ds["status"] == "validated" and ds["detected_format"] == "csv"
+    assert ds["status"] == "ready" and ds["detected_format"] == "csv"
+    assert ds["head_version"]["version_number"] == 0
+    assert (ds["head_version"]["n_rows"], ds["head_version"]["n_cols"]) == (2, 3)
     job = user.client.get(f"/api/v1/jobs/{body['job']['id']}").json()  # type: ignore[index]
     assert job["status"] == "succeeded" and job["poll_after_ms"] == 0
     # The original bytes are stored unchanged.
@@ -149,9 +151,11 @@ def test_delete_purges_storage_and_rows(make_client: ClientFactory, ctx: AppCont
     assert r.status_code == 202
     purge = user.client.get(f"/api/v1/jobs/{r.json()['job']['id']}").json()
     assert purge["status"] == "succeeded"
-    assert purge["result"] == {"objects_deleted": 1, "verified_empty": True}
+    # raw original + version-0 Parquet + preview artifact
+    assert purge["result"] == {"objects_deleted": 3, "verified_empty": True}
     assert user.client.get(f"/api/v1/datasets/{ds_id}").status_code == 404
-    assert ctx.storage.list_prefix(dataset_prefix("raw", user.user_id, uuid.UUID(ds_id))) == []
+    for area in ("raw", "versions", "artifacts"):
+        assert ctx.storage.list_prefix(dataset_prefix(area, user.user_id, uuid.UUID(ds_id))) == []
 
 
 def test_job_cancel_and_listing(
