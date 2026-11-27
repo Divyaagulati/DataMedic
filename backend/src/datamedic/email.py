@@ -5,6 +5,7 @@ import smtplib
 import ssl
 from dataclasses import dataclass, field
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 from typing import Protocol
 
 from datamedic.config import Settings
@@ -23,6 +24,21 @@ class EmailSender(Protocol):
     def send(self, email: OutgoingEmail) -> None: ...
 
 
+def build_message(sender: str, email: OutgoingEmail) -> EmailMessage:
+    """RFC 5322 message with Date and Message-ID: receiving filters (notably institutional
+    gateways) penalise or quarantine mail that lacks them."""
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = email.to
+    msg["Subject"] = email.subject
+    msg["Date"] = formatdate(usegmt=True)
+    address = parseaddr(sender)[1]
+    msg["Message-ID"] = make_msgid(domain=address.rpartition("@")[2] or None)
+    msg["Reply-To"] = sender
+    msg.set_content(email.body)
+    return msg
+
+
 class SmtpEmailSender:
     def __init__(
         self,
@@ -37,11 +53,7 @@ class SmtpEmailSender:
         self._security, self._username, self._password = security, username, password
 
     def send(self, email: OutgoingEmail) -> None:
-        msg = EmailMessage()
-        msg["From"] = self._sender
-        msg["To"] = email.to
-        msg["Subject"] = email.subject
-        msg.set_content(email.body)
+        msg = build_message(self._sender, email)
         context = ssl.create_default_context()
         smtp: smtplib.SMTP = (
             smtplib.SMTP_SSL(self._host, self._port, timeout=10, context=context)

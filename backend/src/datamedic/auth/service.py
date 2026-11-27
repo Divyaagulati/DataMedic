@@ -96,7 +96,8 @@ def _send_verification(settings: Settings, mailer: EmailSender, email: str, toke
             subject="Verify your DataMedic account",
             body=(
                 "Confirm your email address:\n"
-                f"{settings.public_web_url}/verify-email?token={token}\n"
+                f"{settings.public_web_url}/verify-email?token={token}\n\n"
+                "If you did not sign up for DataMedic, you can ignore this email.\n"
             ),
         ),
     )
