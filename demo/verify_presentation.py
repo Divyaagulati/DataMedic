@@ -168,20 +168,33 @@ def main() -> int:
     check("anonymous access refused", status(anon, f"/datasets/{ds}") == 401)
     if a.isolation:
         o = Client(a.web, a.api, a.insecure)
-        email, pw = f"isolation-check-{uuid.uuid4().hex[:8]}@example.org", "Iso-" + uuid.uuid4().hex
+        pw = "Iso-" + uuid.uuid4().hex
+        if a.mailpit:
+            email = f"isolation-check-{uuid.uuid4().hex[:8]}@example.org"
+        else:  # real email: a +isolation alias of the presentation address; the owner clicks the link
+            local, domain = cred["DEMO_EMAIL"].split("@", 1)
+            email = f"{local}+isolation{uuid.uuid4().hex[:4]}@{domain}"
         o.call("POST", "/auth/signup", {"email": email, "password": pw})
-        token = None
-        for _ in range(30):
-            for m in o.call("GET", a.mailpit.rstrip("/") + "/api/v1/messages").get("messages", []):
-                if any(t.get("Address") == email for t in m.get("To", [])):
-                    full = o.call("GET", a.mailpit.rstrip("/") + f"/api/v1/message/{m['ID']}")
-                    found = re.search(r"token=([A-Za-z0-9_\-]+)", full.get("Text", ""))
-                    token = found.group(1) if found else token
-            if token:
-                break
-            time.sleep(1)
-        o.call("POST", "/auth/verify-email", {"token": token})
-        o.login(email, pw)
+        if a.mailpit:
+            token = None
+            for _ in range(30):
+                for m in o.call("GET", a.mailpit.rstrip("/") + "/api/v1/messages").get("messages", []):
+                    if any(t.get("Address") == email for t in m.get("To", [])):
+                        full = o.call("GET", a.mailpit.rstrip("/") + f"/api/v1/message/{m['ID']}")
+                        found = re.search(r"token=([A-Za-z0-9_\-]+)", full.get("Text", ""))
+                        token = found.group(1) if found else token
+                if token:
+                    break
+                time.sleep(1)
+            o.call("POST", "/auth/verify-email", {"token": token})
+            o.login(email, pw)
+        else:
+            if not o.login(email, pw):  # login may require verification on some configurations
+                print("ACTION: click the verification link emailed to the '+isolation' address", flush=True)
+                for _ in range(360):
+                    if o.login(email, pw):
+                        break
+                    time.sleep(5)
         paths = [f"/datasets/{ds}", f"/versions/{v2}/passport", f"/training-runs/{st['training_main']}",
                  f"/dashboards/{st['dashboard_id']}", f"/experiments/{st['experiment_id']}",
                  f"/exports/{st['csv_export_job']}/download"]
