@@ -2,7 +2,7 @@
 resource-limited child process, collect its outputs.
 
 The child's stdout/stderr are discarded, never logged: tracebacks from parsers can contain
-cell values (CLAUDE.md invariant 2).
+cell values (DEVELOPMENT_GUIDE.md invariant 2).
 """
 
 import json

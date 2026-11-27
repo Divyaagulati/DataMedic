@@ -62,7 +62,7 @@ The browser talks only to `web` and `api`. Storage, broker and database are on a
 
 ```
 datamedic/
-├── CLAUDE.md
+├── DEVELOPMENT_GUIDE.md
 ├── docs/
 ├── apps/
 │   └── web/                         # Next.js app

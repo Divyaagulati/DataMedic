@@ -1,6 +1,6 @@
 """Part E job handlers (worker): impact preview, commit, revert, version comparison.
 
-Commit and revert are the only writers of new versions (CLAUDE.md invariant 9):
+Commit and revert are the only writers of new versions (DEVELOPMENT_GUIDE.md invariant 9):
 1. idempotency: a job whose result already exists (its transformation run or version) ends
    as succeeded without doing anything (``claim_job`` already prevents parallel runs);
 2. ``commit_readiness`` (the same checks as the API) runs before any data is read;

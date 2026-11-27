@@ -1,6 +1,6 @@
 """Running checks: context, honest ``not_assessed``, error isolation, finding validation.
 
-Rules (CLAUDE.md invariant 8):
+Rules (DEVELOPMENT_GUIDE.md invariant 8):
 - an unmet requirement yields ``not_assessed`` with the reason, never "no issue found";
 - every finding carries evidence, severity and limitations; sampling is disclosed;
 - an exception inside a check becomes an ``error`` finding (``CHECK_ERROR``) whose text

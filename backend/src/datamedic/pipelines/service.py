@@ -1,6 +1,6 @@
 """Pipelines, impact previews, approvals, commits, reverts and comparisons (API side).
 
-Authority rules (CLAUDE.md invariant 7):
+Authority rules (DEVELOPMENT_GUIDE.md invariant 7):
 - risk, destructive flag, kind and op version come from the catalogue; the chosen stage is
   explicit; step and spec hashes are recomputed by the service on every change (and again
   by the worker), never taken from the client;

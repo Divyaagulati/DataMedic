@@ -75,7 +75,7 @@ Not done (still with their original phases): re-parse with user options and the 
 
 ### Phase 3 status (2026-11-09) — "Intelligent diagnostics", as scoped by the owner
 Owner decisions:
-- ECOD and COPOD are implemented in-house behind the `OutlierDetector` port. PyOD stays out of the MVP, as CLAUDE.md requires.
+- ECOD and COPOD are implemented in-house behind the `OutlierDetector` port. PyOD stays out of the MVP, as DEVELOPMENT_GUIDE.md requires.
 - The financial, business and industrial modules move into the MVP (PRD FR-4.4a).
 
 This delivers most of the original Phase 4 and part of Phase 5:

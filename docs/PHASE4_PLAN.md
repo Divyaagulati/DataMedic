@@ -107,7 +107,7 @@ Doc conflicts this plan resolves once approved: Feature-engine in ML_ENGINE_DESI
 | `apps/web/src/lib/queries.ts`, `lib/api/openapi.json`, `lib/api/schema.d.ts` | Hooks; regenerated client | A, D, E |
 | `apps/web/src/app/datasets/[datasetId]/dataset-detail.tsx` | Head version, version count, link to History | E |
 | `apps/web/src/components/diagnostics/finding-card.tsx` | "See recommendations" link | D |
-| `docs/*.md`, `README.md`, `CLAUDE.md` | Keep design and code in agreement at the end of each part | A–E |
+| `docs/*.md`, `README.md`, `DEVELOPMENT_GUIDE.md` | Keep design and code in agreement at the end of each part | A–E |
 
 ## 4. New files
 

@@ -1,7 +1,7 @@
 """Contract tests for the scikit-learn behaviour the preprocessing ops rely on.
 
 They pin facts verified against the locked version (scikit-learn 1.9.1). If an upgrade
-changes one, this file fails first and the op must be reviewed (CLAUDE.md: never assume
+changes one, this file fails first and the op must be reviewed (DEVELOPMENT_GUIDE.md: never assume
 library APIs).
 """
 

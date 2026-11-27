@@ -1,5 +1,5 @@
 """Composition root: the only place that lists domain modules. Core packages never import
-them (CLAUDE.md invariant 11); adding a module means adding one line here."""
+them (DEVELOPMENT_GUIDE.md invariant 11); adding a module means adding one line here."""
 
 from functools import lru_cache
 

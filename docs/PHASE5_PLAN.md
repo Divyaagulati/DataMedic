@@ -92,7 +92,7 @@ The repository is the source of truth; the documents were checked against it.
 |---|---|---|
 | C1 | PRD §4 non-goals list "hyper-parameter tuning or AutoML"; PRD §10 and the roadmap list tuning as a Future enhancement. The brief asks for baseline AutoML and hyper-parameter selection. | Approve **bounded nested-CV selection over fixed small grids** (§5.4). Record it in the PRD as an owner decision; open-ended AutoML stays a non-goal. (P1) |
 | C2 | PRD FR-8.4 and §10 put calibration plots, bootstrap CIs and random forest in V2. | Pull in calibration assessment, group-aware bootstrap intervals and random forest. Keep the locked holdout in V2. (P1) |
-| C3 | PRD FR-8.1 lists XGBoost as MVP and CLAUDE.md lists it in the pinned baseline, but D3 deferred it and it is not installed. CLAUDE.md also lists Cleanlab and statsmodels, which are not installed. | Keep XGBoost deferred (P2). Correct the CLAUDE.md "pinned baseline" line to the installed libraries. |
+| C3 | PRD FR-8.1 lists XGBoost as MVP and DEVELOPMENT_GUIDE.md lists it in the pinned baseline, but D3 deferred it and it is not installed. DEVELOPMENT_GUIDE.md also lists Cleanlab and statsmodels, which are not installed. | Keep XGBoost deferred (P2). Correct the DEVELOPMENT_GUIDE.md "pinned baseline" line to the installed libraries. |
 | C4 | Roadmap "Phase 5" = remaining universal checks + biomedical clinical module. | Add a scope-mapping note to the roadmap. Those items remain open roadmap work outside this milestone. |
 | C5 | ML_ENGINE_DESIGN §5.5 documents `FITTED_ON_FULL_DATA_SOURCE`, which is not implemented. | Implement it in the Lab (§1.1). This is the only Phase 4 code touched. |
 | C6 | DATABASE_SCHEMA §3.6 designed `model_results.oof_artifact_id`; Part D stores no out-of-fold predictions. | Training runs store out-of-fold predictions as an owner-only artifact (§9). The Lab is unchanged. |
@@ -186,7 +186,7 @@ For each outer fold *k*:
 | `random_forest` | `RandomForestClassifier(n_estimators=100, max_depth ∈ {6, 12}, min_samples_leaf ∈ {2, 10}, n_jobs=1)` | `RandomForestRegressor` (same) |
 | `hgb` | `HistGradientBoostingClassifier(learning_rate ∈ {0.05, 0.1}, max_leaf_nodes ∈ {15, 31}, early_stopping=False)` | `HistGradientBoostingRegressor` (same) |
 
-Every estimator gets `random_state = seed`. Parameter names are confirmed against scikit-learn 1.9.1 in a contract test before use (CLAUDE.md library rule).
+Every estimator gets `random_state = seed`. Parameter names are confirmed against scikit-learn 1.9.1 in a contract test before use (DEVELOPMENT_GUIDE.md library rule).
 
 **Tuning modes:**
 - `nested` (default when feasible);
@@ -557,7 +557,7 @@ A manual browser checklist is delivered for the owner.
 9. **Frontend:** OpenAPI export and client generation; lib and hooks; chart primitives; pages and components; tests.
 10. **Full regression and fixes.**
 11. **Live-stack rebuild and the smoke test**; benchmarks at representative sizes (5k, 20k, 100k rows) recorded honestly.
-12. **Docs:** ML_ENGINE_DESIGN (§5 training, §6 auditor), API_SPECIFICATION, DATABASE_SCHEMA, ARCHITECTURE (modules, jobs), PRD (decisions C1–C3), IMPLEMENTATION_ROADMAP, README, CLAUDE.md (Phase 5 invariants, corrected pinned baseline); final report.
+12. **Docs:** ML_ENGINE_DESIGN (§5 training, §6 auditor), API_SPECIFICATION, DATABASE_SCHEMA, ARCHITECTURE (modules, jobs), PRD (decisions C1–C3), IMPLEMENTATION_ROADMAP, README, DEVELOPMENT_GUIDE.md (Phase 5 invariants, corrected pinned baseline); final report.
 
 ---
 

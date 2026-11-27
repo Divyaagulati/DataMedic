@@ -226,7 +226,7 @@ def upgrade() -> None:
         "FOR EACH ROW EXECUTE FUNCTION enforce_version_in_dataset()"
     )
 
-    # ---- Versions are immutable (CLAUDE.md invariant 5); only deleted_at may change -------
+    # ---- Versions are immutable (DEVELOPMENT_GUIDE.md invariant 5); only deleted_at may change -------
     op.execute(
         """
         CREATE FUNCTION dataset_versions_immutable() RETURNS trigger
