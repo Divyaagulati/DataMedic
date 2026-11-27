@@ -152,6 +152,34 @@ def test_binary_run_end_to_end(ready, ctx: AppContext) -> None:  # type: ignore[
         assert art is not None and art.owner_type == "training_run"
 
 
+@pytest.mark.parametrize(
+    "step",
+    [
+        {"op": "imbalance.class_weight", "columns": [], "params": {}},
+        {
+            "op": "imbalance.random_oversample",
+            "columns": [],
+            "params": {"sampling_strategy": "minority"},
+        },
+    ],
+)
+def test_target_aware_preprocessing_runs_and_reruns(ready, step) -> None:  # type: ignore[no-untyped-def]
+    # Validation adds context parameters (task, target, passthrough) to target-aware steps; the
+    # worker and the rerun must re-validate the requested form, not reject those as unknown.
+    user, _, vid = ready
+    r = _train(user, vid, {**FAST, "preprocess_steps": [step]})
+    assert r.status_code == 202, r.text
+    assert r.json()["job"]["status"] == "succeeded", r.json()["job"]
+    rid = r.json()["training_run"]["id"]
+    run = _run(user, rid)
+    assert [s["op"] for s in run["preprocess_steps"]] == [step["op"]]
+    assert run["evaluations"][1]["status"] == "completed"
+    rr = user.client.post(f"/api/v1/training-runs/{rid}/rerun", headers=user.headers(**_key()))
+    assert rr.status_code == 202 and rr.json()["job"]["status"] == "succeeded", rr.text
+    run2 = _run(user, rr.json()["training_run"]["id"])
+    assert run2["spec_hash"] == run["spec_hash"]
+
+
 def test_regression_nested_run(ready) -> None:  # type: ignore[no-untyped-def]
     user, _, vid = ready
     _roles(user, vid, [{"column": "lab", "role": "target", "task_type": "regression"}])

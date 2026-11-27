@@ -102,11 +102,7 @@ def train(hctx: HandlerContext) -> JobOutcome:
         )
     ctx = validation_context(selected, cfg["roles"])
     pre_validation = service.validate_preprocess(
-        [
-            {"op": s["op"], "columns": s["columns"], "params": s["params"]}
-            for s in cfg["preprocess_steps"]
-        ],
-        ctx,
+        service.requested_steps(cfg["preprocess_steps"]), ctx
     )
     if not pre_validation.valid or pre_validation.spec_hash != cfg["spec_hash"]:
         return _fail(

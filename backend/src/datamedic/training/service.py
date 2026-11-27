@@ -223,6 +223,21 @@ def _steps(raw: list[dict[str, Any]]) -> list[Step]:
     ]
 
 
+def requested_steps(stored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The requested form of stored (validated) steps: op, columns and the op's declared
+    parameters only. Validation adds context-derived parameters (e.g. ``task``, ``target``,
+    ``passthrough`` for target-aware ops); re-validating a stored step must start from the
+    request, or those would be rejected as unknown. Declared parameters keep their (filled)
+    values, so re-validation reproduces the stored step hashes."""
+    out = []
+    for s in stored:
+        spec = get_op(str(s["op"]))
+        declared = {p.name for p in spec.params} if spec else set(s["params"])
+        params = {k: v for k, v in s["params"].items() if k in declared}
+        out.append({"op": s["op"], "columns": list(s["columns"]), "params": params})
+    return out
+
+
 def validate_preprocess(raw: list[dict[str, Any]], ctx: ValidationContext) -> ValidationResult:
     return validate_steps(_steps(raw), ctx)
 
@@ -624,10 +639,7 @@ def rerun(
         "tuning": {"mode": cfg["tuning"]["requested"]},
         "seed": cfg["seed"],
         "split": {k: cfg["split"][k] for k in ("method", "n_splits", "seed")},
-        "preprocess_steps": [
-            {"op": s["op"], "columns": s["columns"], "params": s["params"]}
-            for s in cfg["preprocess_steps"]
-        ],
+        "preprocess_steps": requested_steps(cfg["preprocess_steps"]),
         "allow_exploratory": cfg["evaluation_mode"] == EXPLORATORY,
     }
     return create(db, settings, owner_id, original.dataset_version_id, body, key, rerun_of=original)
