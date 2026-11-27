@@ -8,10 +8,11 @@ without leakage, applies approved transformations as new immutable versions, tra
 models with leakage-controlled evaluation, audits their reliability, and exports a consolidated
 Data Passport.
 
-> **Status (2026-11-27):** feature-complete and browser-verified locally; production deployment
-> configuration is ready ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)). **Not yet publicly deployed.**
+> **Live demo:** <https://20-196-218-255.sslip.io> — deployed on Microsoft Azure (Ubuntu 24.04,
+> Docker Compose, Caddy with Let's Encrypt HTTPS); see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 > This is a demonstration MVP: use synthetic or non-sensitive data. Biomedical features are for
-> research use only; DataMedic is not a medical device.
+> research use only; DataMedic is not a medical device. Verification emails may arrive in the
+> spam folder (shared-hosting domain).
 
 ## Why DataMedic
 
@@ -79,8 +80,10 @@ internal network. Broker messages carry only a job id. Details: [docs/ARCHITECTU
 ```
 docker-compose.yml        local stack: postgres, redis, mailpit, migrate, api, worker-ingest, worker, beat, web
 docker-compose.prod.yml   production stack behind Caddy (see docs/DEPLOYMENT.md)
-deploy/                   Caddyfile, .env.production.example, backup.sh
+deploy/                   Caddyfile, .env.production.example, backup.sh, server_setup.sh (one-command VM setup)
+demo/                     presentation dataset builder, API-only provisioning and verification scripts
 .env.example              every development setting (copy to .env)
+DEVELOPMENT_GUIDE.md      architecture invariants, security and library rules for contributors
 backend/                  FastAPI API + Celery workers (Python 3.12, uv)
   src/datamedic/
     api/ auth/ jobs/ workers/ db/ storage/ security/   platform: app, sessions, jobs, RLS, private storage
@@ -109,8 +112,36 @@ docs/                     PRD, architecture, API, database, privacy, ML engine, 
 | Static checks | ruff, format, strict mypy, TypeScript, ESLint, production builds — all pass |
 | Live end-to-end smoke (dev stack) | 15/15 Analytics Studio checks; 22/22 MVP checks |
 | Production rehearsal (`docker-compose.prod.yml`, HTTPS via Caddy, clean database) | 22/22 and 14/14 |
+| Presentation demo verification (`demo/verify_presentation.py`), local and Azure | 41/41 each (incl. cross-account isolation); 40/40 again after a full restart / VM reboot |
+| Azure production checks | valid HTTPS certificate, HTTP→HTTPS redirect, 5 security headers, ports 5432/6379/8000/3000 closed |
+| Regression tests for the final fixes | training with class weights / oversampling (run and rerun); auth incl. resend cooldown (14 passed); email headers; frontend 105 passed |
 
 The 4 skips are pre-existing parametrisations (`tests/unit/test_check_framework.py:91`).
+
+## Demonstration dataset (reproducible)
+
+The live and local demos use a public, de-identified research dataset: **UCI Diabetes 130-US
+Hospitals for Years 1999–2008** (<https://doi.org/10.24432/C5230J>, CC BY 4.0). Task: predict
+**readmission within 30 days**, at discharge. `demo/build_presentation_dataset.py`
+rebuilds the subset from the original archive: death/hospice discharges excluded, **patient-level**
+sampling (seed `20261127`) to 4,000 encounters of 2,864 patients (11.2% readmitted), documented
+missing-value normalisation and a binary target; every step and both SHA-256 hashes go into
+`provenance.json`. The data itself is not committed.
+
+```bash
+python -I demo/build_presentation_dataset.py diabetes_130_us_hospitals.zip <out_dir>
+python -I demo/provision_presentation.py --web https://<domain> --credentials <account.env>   --dataset <out_dir>/diabetes_readmission_presentation.csv --state <out_dir>/state.json
+python -I demo/verify_presentation.py --web https://<domain> --credentials <account.env> --state <out_dir>/state.json
+```
+
+Provisioning uses only the public API (normal sign-up and email verification, no database access)
+and prepares diagnostics, the biomedical summary, recommendations, an Experiment Lab comparison, a
+committed version, two training runs with reliability audits, insights, the dashboard *Hospital
+Readmission Intelligence* and exports. Observed results (patient-grouped 5-fold, nested tuning):
+ROC-AUC random forest 0.631 ± 0.034, logistic regression 0.623 ± 0.021, gradient boosting
+0.594 ± 0.024, dummy 0.500 — a modest, honestly reported signal. Walkthrough:
+[docs/PRESENTATION_GUIDE.md](docs/PRESENTATION_GUIDE.md), one page:
+[docs/PRESENTATION_CHEATSHEET.md](docs/PRESENTATION_CHEATSHEET.md), details: [demo/README.md](demo/README.md).
 
 ## Privacy and security safeguards
 
@@ -130,6 +161,8 @@ The 4 skips are pre-existing parametrisations (`tests/unit/test_check_framework.
 - Small-group suppression does not protect against differencing across many queries; no differential privacy is claimed.
 - The Copilot understands a fixed set of question patterns; it is not a generative model.
 - Analytics are limited to versions of up to 200,000 rows / 5 million cells on a single server.
+- Single-VM deployment without high availability; the arm64 build is prepared but has only been run on x86-64.
+- Account emails use a shared sslip.io hostname and a personal SMTP sender, so they may be filtered as spam; a custom domain with SPF/DKIM is recommended for wider use.
 
 ## Future enhancements
 
@@ -140,16 +173,19 @@ a nonce-based Content Security Policy, horizontal scaling, and advanced omics an
 
 ## Production deployment
 
-DataMedic deploys to a single Ubuntu server with Docker Compose, Caddy and automatic HTTPS
-(4 vCPU / 8 GB RAM recommended). Step-by-step instructions, sizing, hosting options, backups,
-restore and rollback: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+DataMedic deploys to a single Ubuntu server with Docker Compose, Caddy and automatic HTTPS.
+The live instance runs on **Microsoft Azure** (Standard_B2s_v2: 2 vCPU, 8 GB RAM, 64 GB SSD,
+Korea Central) at <https://20-196-218-255.sslip.io>. Step-by-step instructions, sizing, hosting
+options, the Azure CLI commands used, backups, restore, rollback and cost control:
+**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 ```bash
+# on the server, in a checkout of this repository
 cp deploy/.env.production.example .env.production   # fill in every value; never commit it
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+./deploy/server_setup.sh   # swap, Docker, firewall, image builds, migrations, health check, nightly backups
 ```
 
-Contributor and agent rules: [CLAUDE.md](CLAUDE.md).
+Contributor guide (architecture invariants, security and library rules): [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md).
 
 ---
 

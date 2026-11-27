@@ -36,6 +36,7 @@ Files: `docker-compose.prod.yml`, `deploy/Caddyfile`, `deploy/.env.production.ex
 
 | Option | Fit | Cost |
 |---|---|---|
+| **Microsoft Azure (Azure for Students), Standard_B2s_v2** (2 vCPU x86-64 / 8 GB, 64 GB Standard SSD) | **Live deployment** (Korea Central; Student subscriptions allow only a few regions) | ≈ $2.78/day running (≈ $84/month incl. disk and static IP); ≈ $0.28/day deallocated; billed against student credit |
 | **Oracle Cloud Always Free, Ampere A1** (up to 4 OCPU / 24 GB, 200 GB) | Best free fit (arm64). Capacity in popular regions can be temporarily unavailable. | Free (card needed for identity) |
 | **Hetzner Cloud CAX21** (4 vCPU arm64 / 8 GB / 80 GB) or CX32 (x86) | Recommended paid; fast to provision | ~€7–8 / month |
 | DigitalOcean / Linode 8 GB droplet | Works | ~$48 / month |
@@ -62,6 +63,7 @@ sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapf
   && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 # 4. Code (copy the repository: git clone from your remote, or scp a release archive)
+#    Shortcut for steps 1-3 and 6 plus backups: after step 5, run ./deploy/server_setup.sh
 git clone <your-repository-url> datamedic && cd datamedic
 
 # 5. Secrets: fill in every value; generate secrets with `openssl rand -hex 24`
@@ -142,3 +144,40 @@ Take a backup before every update.
 - `.env.production` is mode 600 and not in git. No development data or credentials are copied.
 - Until a security review of the deployed instance is complete, restrict use to synthetic or
   non-sensitive demonstration data (the UI footer and landing page say so).
+
+## 6. Live deployment: Microsoft Azure
+
+DataMedic is deployed at **<https://20-196-218-255.sslip.io>** (Let's Encrypt certificate via Caddy).
+
+| | |
+|---|---|
+| Subscription | Azure for Students (spending limit on) |
+| Region / resource group | Korea Central / `datamedic-rg` |
+| VM | `datamedic-vm`, Standard_B2s_v2 (2 vCPU x86-64, 8 GB RAM) + 4 GB swap |
+| OS / disk | Ubuntu 24.04 LTS, 64 GB Standard SSD (LRS) |
+| Network | Static Standard public IPv4; NSG allows 22 (SSH key only), 80 and 443 |
+| Stack | `docker-compose.prod.yml` with `restart: unless-stopped`; Docker enabled at boot |
+| Email | Authenticated SMTP with STARTTLS (port 587) |
+| Backups | `deploy/backup.sh` nightly at 03:00 UTC (keeps 7), PostgreSQL dump + storage archive |
+
+Provisioning (Azure CLI, after `az login`):
+
+```bash
+az group create -n datamedic-rg -l koreacentral
+az vm create -g datamedic-rg -n datamedic-vm --size Standard_B2s_v2   --image Canonical:ubuntu-24_04-lts:server:latest --admin-username azureuser   --ssh-key-values <your-public-key.pub> --authentication-type ssh   --os-disk-size-gb 64 --storage-sku StandardSSD_LRS   --public-ip-sku Standard --public-ip-address-allocation static --nsg-rule SSH
+az vm open-port -g datamedic-rg -n datamedic-vm --port 80,443 --priority 1010
+```
+
+Then on the VM: clone the repository, create `.env.production` from
+`deploy/.env.production.example` (domain `<ip-with-dashes>.sslip.io`), and run
+`./deploy/server_setup.sh`.
+
+Cost control: `az vm deallocate -g datamedic-rg -n datamedic-vm` stops compute billing (the static
+IP and URL are kept); `az vm start ...` resumes; `az group delete -n datamedic-rg` removes
+everything.
+
+Deployment checks performed (2026-11-27): HTTPS with a valid certificate and HTTP→HTTPS redirect;
+HSTS, CSP, `nosniff`, `X-Frame-Options` and `Referrer-Policy` headers; ports 5432, 6379, 8000 and
+3000 unreachable from the internet; migrations at `0009`; presentation workflows, sign-up and email verification of the
+presentation account, and cross-account isolation (404) verified; all services restarted
+automatically after a VM reboot.
