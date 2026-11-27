@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 VERIFY_TTL = timedelta(hours=24)
 RESET_TTL = timedelta(minutes=30)
+RESEND_COOLDOWN = timedelta(seconds=60)
 
 
 def _now() -> datetime:
@@ -114,6 +115,15 @@ def _safe_send(mailer: EmailSender, email: OutgoingEmail) -> None:
 def resend_verification(db: Session, settings: Settings, mailer: EmailSender, user: User) -> None:
     if user.email_verified_at is not None:
         return
+    recent = db.scalar(
+        select(AuthToken.id).where(
+            AuthToken.user_id == user.id,
+            AuthToken.purpose == "verify_email",
+            AuthToken.created_at > _now() - RESEND_COOLDOWN,
+        )
+    )
+    if recent is not None:  # protects the mailbox and the SMTP sender's daily quota
+        raise RateLimited("A verification email was sent less than a minute ago.")
     token = _issue_token(db, user.id, "verify_email", VERIFY_TTL)
     db.commit()
     _send_verification(settings, mailer, user.email, token)

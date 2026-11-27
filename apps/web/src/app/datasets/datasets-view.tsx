@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { useAuth } from "@/components/auth-provider";
 import { FormError, FormNotice } from "@/components/form-error";
+import { ResendVerification } from "@/components/resend-verification";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -69,7 +70,7 @@ export function DatasetsView() {
         ) : null}
       </div>
       {!user.email_verified ? (
-        <FormNotice message="Verify your email address (check your inbox) before uploading data." />
+        <ResendVerification />
       ) : (
         <UploadCard
           onUploaded={() => void queryClient.invalidateQueries({ queryKey: ["datasets"] })}

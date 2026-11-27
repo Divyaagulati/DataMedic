@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from datamedic.context import AppContext
-from tests.conftest import PASSWORD, ClientFactory, outbox, signup_and_login
+from tests.conftest import PASSWORD, ClientFactory, last_token, outbox, signup_and_login
 
 pytestmark = pytest.mark.integration
 
@@ -41,6 +41,31 @@ def test_signup_does_not_reveal_existing_accounts(
     assert first.status_code == second.status_code == 202
     assert first.json() == second.json()
     assert len([m for m in outbox(ctx).outbox if m.to == email]) == sent
+
+
+def test_resend_verification_is_rate_limited_and_delivers_a_working_link(
+    make_client: ClientFactory, ctx: AppContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import timedelta
+
+    from datamedic.auth import service
+
+    client = make_client()
+    user = signup_and_login(client, ctx, verify=False)
+    url = "/api/v1/auth/verify-email/resend"
+    # Right after sign-up the cooldown applies (protects the mailbox and the SMTP quota).
+    r = client.post(url, headers=user.headers())
+    assert r.status_code == 429 and r.json()["code"] == "RATE_LIMITED"
+    monkeypatch.setattr(service, "RESEND_COOLDOWN", timedelta(0))
+    before = len([m for m in outbox(ctx).outbox if m.to == user.email])
+    assert client.post(url, headers=user.headers()).status_code == 202
+    assert len([m for m in outbox(ctx).outbox if m.to == user.email]) == before + 1
+    r = client.post("/api/v1/auth/verify-email", json={"token": last_token(ctx, user.email)})
+    assert r.status_code == 204
+    assert client.get("/api/v1/auth/me").json()["user"]["email_verified"] is True
+    # Once verified, resending sends nothing.
+    assert client.post(url, headers=user.headers()).status_code == 202
+    assert len([m for m in outbox(ctx).outbox if m.to == user.email]) == before + 1
 
 
 def test_weak_password_rejected(make_client: ClientFactory) -> None:
